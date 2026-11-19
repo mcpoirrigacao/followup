@@ -595,7 +595,7 @@ function indexarPecas(data){
   }
 }
 function indexarAssist(data){
-  ext.assist=data; ext.assistFlow={}; ext.assistSnap={};
+  ext.assist=data; ext.assistFlow={}; ext.assistSnap={}; ext.assistOS=[];
   const cfg=data.config||{}; const fech=cfg.statusFechados||['Fechada'];
   const sit=cfg.situacoes||{faturado:'Faturado',pendente:'Pendente',naoAplica:'Não se aplica'};
   const chave=(cfg.chaveBaixaInterna||'').trim().toUpperCase();
@@ -608,13 +608,15 @@ function indexarAssist(data){
     if(!ext.assistBases.some(x=>linhaId(fake,x)===lid)) ext.assistBases.push(base);
     const ab=(r.dataAbertura||'').trim(), fat=(r.dataFaturamento||'').trim();
     if(/^\d{4}-\d{2}-\d{2}$/.test(ab)) flow(segunda(ab),lid).a_abertas++;
-    if(/^\d{4}-\d{2}-\d{2}$/.test(fat)){ const f=flow(segunda(fat),lid); f.a_fatqtd++; f.a_fatvalor+=n(r.valor); }
     const sn=(ext.assistSnap[lid]=ext.assistSnap[lid]||{a_emaberto:0,a_pend:0,a_maisantiga:0,_soma:0,a_media:0});
     const aberta=!fech.includes(r.status);
     if(aberta){ sn.a_emaberto++; if(/^\d{4}-\d{2}-\d{2}$/.test(ab)){ const dias=Math.max(0,Math.round((h0-D(ab))/86400000)); sn._soma+=dias; sn.a_maisantiga=Math.max(sn.a_maisantiga,dias); } }
     const fp=(r.formaPagamento||'').toUpperCase();
     const situ=(chave&&fp.includes(chave))?sit.naoAplica:((r.nfse||'').trim()&&fat)?sit.faturado:aberta?'Em Andamento':sit.pendente;
     if(situ===sit.pendente) sn.a_pend+=n(r.valor);
+    const ehFat=situ===sit.faturado&&/^\d{4}-\d{2}-\d{2}$/.test(fat);
+    if(ehFat){ const f=flow(segunda(fat),lid); f.a_fatqtd++; f.a_fatvalor+=n(r.valor); }
+    ext.assistOS.push({regiao:(r.regiao||'').trim()||'(sem regional)',ab:/^\d{4}-\d{2}-\d{2}$/.test(ab)?ab:'',fat:ehFat?fat:'',valor:n(r.valor),aberta,pend:situ===sit.pendente});
   });
   Object.values(ext.assistSnap).forEach(sn=>{ sn.a_media=sn.a_emaberto?Math.round(sn._soma/sn.a_emaberto*10)/10:0; });
 }
@@ -639,6 +641,46 @@ function indexarTrein(data){
   ext.treinLinhas=[...Array.from(fil).sort(),'CLIENTES'];
 }
 const SNAP=['a_emaberto','a_pend','a_maisantiga','a_media'];
+/* ---- Resumo de faturamento e regionais (Assistência) — mesma regra do app: faturado = NFS-e + data de faturamento;
+   meta = Período da Meta configurado no app; meses inteiros com Faturamento Histórico manual usam esse valor ---- */
+function assistFatPeriodo(a,b,reg){
+  const cfg=(ext.assist&&ext.assist.config)||{}; const H=cfg.faturamentoHistorico||{};
+  const regs=reg!=null?[reg]:Array.from(new Set([...(cfg.regioes||[]),...ext.assistOS.map(o=>o.regiao)]));
+  let tot=0;
+  regs.forEach(rg=>{ let d=D(a); const end=D(b); let g=0;
+    while(d<=end&&g<240){ const m0=isoStr(new Date(d.getFullYear(),d.getMonth(),1)), m1=isoStr(new Date(d.getFullYear(),d.getMonth()+1,0));
+      const A_=m0<a?a:m0, B_=m1>b?b:m1; const hist=(A_===m0&&B_===m1&&H[rg]&&H[rg][m0.slice(0,7)]!=null&&H[rg][m0.slice(0,7)]!=='')?n(H[rg][m0.slice(0,7)]):null;
+      tot+=hist!=null?hist:ext.assistOS.filter(o=>o.regiao===rg&&o.fat&&o.fat>=A_&&o.fat<=B_).reduce((x,o)=>x+o.valor,0);
+      d=addDays(D(m1),1); g++; } });
+  return tot;
+}
+function resumoAssistHtml(s){
+  if(!ext.assist) return `<div class="note warn">Resumo de faturamento e regionais: faça login para ler o app de Assistência Técnica.</div>`;
+  const cfg=ext.assist.config||{}; const fim=isoStr(addDays(D(s),6)), ant=addSem(s,-1), fimAnt=isoStr(addDays(D(ant),6));
+  const mes0=s.slice(0,8)+'01'; const mesIni=D(fim).getMonth()===D(s).getMonth()?mes0:fim.slice(0,8)+'01';
+  const regs=Array.from(new Set([...(cfg.regioes||[]),...ext.assistOS.map(o=>o.regiao)]));
+  const pv=!!(cfg.periodoInicio&&cfg.periodoFim&&cfg.periodoInicio<=cfg.periodoFim);
+  const perFim=pv?(fim<cfg.periodoFim?fim:cfg.periodoFim):null; const perOk=pv&&perFim>=cfg.periodoInicio;
+  const linha=rg=>{ const os=ext.assistOS.filter(o=>rg==null||o.regiao===rg);
+    const fs=os.filter(o=>o.fat&&o.fat>=s&&o.fat<=fim);
+    const meta=pv?(rg==null?(cfg.regioes||[]).reduce((t,r)=>t+n((cfg.metas||{})[r]),0):n((cfg.metas||{})[rg])):0;
+    const real=perOk?assistFatPeriodo(cfg.periodoInicio,perFim,rg):0;
+    return {abertas:os.filter(o=>o.ab>=s&&o.ab<=fim).length, andamento:os.filter(o=>o.aberta).length, fatQtd:fs.length, fatSem:fs.reduce((t,o)=>t+o.valor,0),
+      fatAnt:os.filter(o=>o.fat&&o.fat>=ant&&o.fat<=fimAnt).reduce((t,o)=>t+o.valor,0), fatMes:assistFatPeriodo(mesIni,fim,rg), pend:os.filter(o=>o.pend).reduce((t,o)=>t+o.valor,0), meta, real};
+  };
+  const T=linha(null); const R=regs.map(rg=>({rg,...linha(rg)}));
+  const mesNome=D(fim).toLocaleDateString('pt-BR',{month:'long'});
+  let h=`<div class="block-title">Resumo de faturamento</div><div class="totals-strip">`+
+    tbox('Faturado na semana',brl0(T.fatSem),`${int(T.fatQtd)} OS · sem. anterior ${brl0(T.fatAnt)} ${deltaHtml(T.fatSem,T.fatAnt)}`,{accent:true})+
+    tbox('Faturado em '+mesNome,brl0(T.fatMes),`de ${ddmm(mesIni)} até ${ddmm(fim)}`)+
+    (pv?tbox('Meta do período',T.meta?pct(T.real/T.meta):'—',`${brl0(T.real)} de ${brl0(T.meta)} · ${ddmm(cfg.periodoInicio)} a ${ddmm(cfg.periodoFim)}`,{bar:T.meta?T.real/T.meta:null}):tbox('Meta do período','—','período da meta não configurado no app'))+
+    tbox('Pendente de faturar',brl0(T.pend),`${int(T.andamento)} OS em andamento (situação atual)`)+`</div>`;
+  h+=`<div class="card"><h3>Por regional <span class="h3-side">semana ${ddmm(s)} a ${ddmm(fim)}</span></h3><div class="tablewrap"><table class="dt"><thead><tr><th>Regional</th><th class="r">OS abertas</th><th class="r">Em andamento*</th><th class="r">OS faturadas</th><th class="r">Faturado semana</th><th class="r">Faturado no mês</th><th class="r">Pendente de faturar*</th>${pv?'<th class="r">Realizado período</th><th class="r">Meta período</th><th>% meta</th>':''}</tr></thead><tbody>`+
+    R.map(x=>`<tr><td class="nome">${escapeHtml(x.rg)}</td><td class="num">${int(x.abertas)}</td><td class="num">${int(x.andamento)}</td><td class="num">${int(x.fatQtd)}</td><td class="num">${brl0(x.fatSem)}</td><td class="num">${brl0(x.fatMes)}</td><td class="num">${brl0(x.pend)}</td>${pv?`<td class="num">${brl0(x.real)}</td><td class="num">${brl0(x.meta)}</td><td style="min-width:120px;"><div style="display:flex;align-items:center;gap:6px;"><div class="bar light" style="flex:1;margin:0;"><span style="width:${x.meta?Math.min(100,x.real/x.meta*100):0}%"></span></div><b style="font-size:.74rem;">${x.meta?pct(x.real/x.meta):'—'}</b></div></td>`:''}</tr>`).join('')+
+    `<tr class="total-row"><td>TOTAL</td><td class="num">${int(T.abertas)}</td><td class="num">${int(T.andamento)}</td><td class="num">${int(T.fatQtd)}</td><td class="num">${brl0(T.fatSem)}</td><td class="num">${brl0(T.fatMes)}</td><td class="num">${brl0(T.pend)}</td>${pv?`<td class="num">${brl0(T.real)}</td><td class="num">${brl0(T.meta)}</td><td><b>${T.meta?pct(T.real/T.meta):'—'}</b></td>`:''}</tr></tbody></table></div>
+    <div class="note">* Situação atual do app (não depende da semana). Faturado = OS com NFS-e e data de faturamento, como no app de Assistência; meta e período vêm dos Parâmetros do app.${pv?' Realizado do período vai do início do período até o fim da semana selecionada.':''}</div></div>`;
+  return h;
+}
 function autoVal(eq,s,lId,key){
   if(key.startsWith('t_')){ if(!ext.trein) return undefined; const x=ext.treinIdx[s]&&ext.treinIdx[s][lId]; return x?x[key]:undefined; }
   if(key.startsWith('p_')){
@@ -798,6 +840,7 @@ function renderEquipe(eq){
   if(segs(eq).length>1){
     html+=`<div class="card"><h3>Por ${eq.segmentos.length?'temperatura / segmento':'segmento'} · semana</h3><div class="tablewrap"><table class="dt">${theadCampos(nums,['<th>Segmento</th>'])}<tbody>${eq.segmentos.map((g,i)=>`<tr><td class="nome"><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${SEG_CORES[i%5]};margin-right:6px;"></i>${escapeHtml(g)}</td>${nums.map(cc=>`<td class="num">${fmt(cc,totalSemana(eq,s,cc,Object.assign({seg:g},filtro)))}</td>`).join('')}</tr>`).join('')}<tr class="total-row"><td>TOTAL</td>${nums.map(cc=>`<td class="num">${fmt(cc,totalSemana(eq,s,cc,filtro))}</td>`).join('')}</tr></tbody></table></div></div>`;
   }
+  if(eq.tipo==='assistencia') html+=resumoAssistHtml(s);
   // semanas x campos
   html+=`<div class="card"><h3>Histórico semanal <span class="h3-side"><button class="btn ghost small" id="btn-csv" type="button">⬇ Exportar CSV</button></span></h3><div class="tablewrap"><table class="dt">${theadCampos(nums,['<th>Semana</th>'])}<tbody>`;
   per.slice().reverse().forEach(w=>{ html+=`<tr${w===s?' style="font-weight:700"':''}><td class="nome">${ddmm(w)} <span style="color:var(--texto-suave);font-weight:400;font-size:.7rem;">S${numSemana(w)}</span></td>${nums.map(cc=>`<td class="num">${fmt(cc,totalSemana(eq,w,cc,filtro))}</td>`).join('')}</tr>`; });
@@ -901,6 +944,7 @@ function renderLanc(){
       <div class="add-row"><input type="text" id="nova-linha" placeholder="Nome do(a) ${escapeHtml((eq.rotuloLinha||'linha').toLowerCase())}">${eq.usaRegional?`<input type="text" id="nova-linha-reg" placeholder="Regional (ex.: R1)" style="max-width:160px;min-width:120px;">`:''}<button class="btn ghost small" id="btn-add-linha" type="button">+ Adicionar</button></div>
       <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px;">${eq.linhas.filter(l=>l.ativo!==false).map(l=>`<span class="chip" style="cursor:default;">${escapeHtml(l.nome)} <button class="btn icon danger" data-desativa="${l.id}" type="button" title="Retirar da lista (o histórico é mantido)">×</button></span>`).join('')}</div></div>`;
   }
+  if(eq.tipo==='assistencia') html+=resumoAssistHtml(s);
   body.innerHTML=html;
   if(!pode) return;
   body.querySelectorAll('input[data-c],select[data-c]').forEach(inp=>{
