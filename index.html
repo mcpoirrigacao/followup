@@ -262,6 +262,15 @@ body:not(.is-admin) .somente-admin{display:none !important;}
       <div class="sub-label">Visualizadores</div>
       <div id="lista-comuns"></div>
       <div class="add-row"><input type="text" id="inp-novo-comum" placeholder="email@maqcampo.com.br"><button class="btn ghost small" id="btn-add-comum" type="button">+ Visualizador</button></div>
+      <div class="sub-label">Liberar acessos no SharePoint</div>
+      <p style="font-size:.8rem;color:var(--texto-suave);margin:0 0 8px;">Exporta todos os e-mails cadastrados (admins, visualizadores e todas as equipes) com a permissão que cada um precisa. Os botões de copiar já trazem os e-mails separados por ";" para colar direto em <b>Compartilhar / Gerenciar acesso</b> da pasta.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn primary small" id="btn-exp-emails" type="button">⬇ Exportar e-mails (Excel/CSV)</button>
+        <button class="btn ghost small" id="btn-cp-editar" type="button">📋 Copiar quem EDITA a pasta FollowUP</button>
+        <button class="btn ghost small" id="btn-cp-ler" type="button">📋 Copiar quem só LÊ a pasta FollowUP</button>
+        <button class="btn ghost small" id="btn-cp-fontes" type="button">📋 Copiar quem LÊ as pastas dos outros apps</button>
+      </div>
+      <div id="emails-resumo" class="note" style="display:none;"></div>
     </div>
 
     <div class="card">
@@ -1361,6 +1370,39 @@ function renderUsuarios(){
   lc.querySelectorAll('[data-rem-comum]').forEach(b=>b.onclick=async()=>{acesso.emailsComuns.splice(+b.dataset.remComum,1);await saveAcesso();renderUsuarios();});
 }
 function renderParametros(){ _renderParametros0(); renderUsuarios(); }
+/* ---- e-mails para liberar acesso no SharePoint ---- */
+function mapaAcessos(){
+  const F=state.config.fontes; const pastaDe={pecas:F.pecas.pasta,assistencia:F.assist.pasta,treinamentos:(F.trein||{}).pasta};
+  const M=new Map(); const get=em=>{em=String(em||'').trim().toLowerCase(); if(!em) return null; if(!M.has(em)) M.set(em,{email:em,perfis:new Set(),equipes:new Set(),editar:false,leitura:new Set()}); return M.get(em);};
+  const fontesTodas=Object.values(pastaDe).filter(Boolean);
+  acesso.emailsAutorizados.forEach(em=>{const x=get(em); if(!x) return; x.perfis.add('Administrador'); x.editar=true; fontesTodas.forEach(p=>x.leitura.add(p));});
+  acesso.emailsComuns.forEach(em=>{const x=get(em); if(!x) return; x.perfis.add('Visualizador geral'); fontesTodas.forEach(p=>x.leitura.add(p));});
+  state.config.equipes.filter(e=>e.ativo!==false).forEach(eq=>{
+    (eq.membros||[]).forEach(em=>{ if(eq.tipo!=='manual') return; const x=get(em); if(!x) return; x.perfis.add('Preenche'); x.equipes.add(eq.nome+' (preenche)'); x.editar=true; });
+    (eq.visualizadores||[]).forEach(em=>{const x=get(em); if(!x) return; x.perfis.add('Visualiza equipe'); x.equipes.add(eq.nome+' (visualiza)'); if(pastaDe[eq.tipo]) x.leitura.add(pastaDe[eq.tipo]);});
+  });
+  return Array.from(M.values()).sort((a,b)=>a.email.localeCompare(b.email));
+}
+function copiarEmails(lista,rotulo){
+  const box=document.getElementById('emails-resumo'); box.style.display='block';
+  if(!lista.length){ box.textContent=`Nenhum e-mail para "${rotulo}".`; return; }
+  const txt=lista.join('; ');
+  const ok=()=>{ box.innerHTML=`<b>${lista.length} e-mail(s) copiados</b> — ${escapeHtml(rotulo)}:<br><span style="word-break:break-all;">${escapeHtml(txt)}</span>`; toast('E-mails copiados.'); };
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok,()=>{ box.innerHTML=`Copie manualmente — ${escapeHtml(rotulo)}:<br><textarea style="width:100%;min-height:70px;">${escapeHtml(txt)}</textarea>`; });
+  else { box.innerHTML=`Copie manualmente — ${escapeHtml(rotulo)}:<br><textarea style="width:100%;min-height:70px;">${escapeHtml(txt)}</textarea>`; }
+}
+document.getElementById('btn-exp-emails').onclick=()=>{
+  const L=mapaAcessos(); if(!L.length){toast('Nenhum e-mail cadastrado.');return;}
+  const linhas=[['E-mail','Nome (antes do @)','Perfil','Equipes','Pasta FollowUP','Leitura nas pastas dos outros apps']];
+  L.forEach(x=>linhas.push([x.email,nomeDoEmail(x.email),Array.from(x.perfis).join(', '),Array.from(x.equipes).join(', '),x.editar?'Editar':'Leitura',Array.from(x.leitura).join(', ')]));
+  const csv='\ufeff'+linhas.map(r=>r.map(v=>/[;"\n]/.test(String(v))?`"${String(v).replace(/"/g,'""')}"`:v).join(';')).join('\n');
+  download(`followup_acessos_${isoStr(new Date())}.csv`,csv,'text/csv;charset=utf-8');
+  const box=document.getElementById('emails-resumo'); box.style.display='block';
+  box.innerHTML=`Exportados <b>${L.length}</b> e-mails: <b>${L.filter(x=>x.editar).length}</b> precisam <b>editar</b> a pasta FollowUP e <b>${L.filter(x=>!x.editar).length}</b> só <b>ler</b>.`;
+};
+document.getElementById('btn-cp-editar').onclick=()=>copiarEmails(mapaAcessos().filter(x=>x.editar).map(x=>x.email),'Pode editar · pasta FollowUP');
+document.getElementById('btn-cp-ler').onclick=()=>copiarEmails(mapaAcessos().filter(x=>!x.editar).map(x=>x.email),'Pode exibir · pasta FollowUP');
+document.getElementById('btn-cp-fontes').onclick=()=>copiarEmails(mapaAcessos().filter(x=>x.leitura.size).map(x=>x.email),'Pode exibir · pastas '+[state.config.fontes.pecas.pasta,state.config.fontes.assist.pasta,(state.config.fontes.trein||{}).pasta].filter(Boolean).join(', '));
 document.getElementById('btn-add-admin').addEventListener('click',async()=>{const em=document.getElementById('inp-novo-admin').value.trim().toLowerCase();if(!em)return;if(!low(acesso.emailsAutorizados).includes(em))acesso.emailsAutorizados.push(em);acesso.emailsComuns=acesso.emailsComuns.filter(x=>x.toLowerCase()!==em);document.getElementById('inp-novo-admin').value='';await saveAcesso();renderUsuarios();applyAccess();toast('Admin adicionado.');});
 document.getElementById('btn-add-comum').addEventListener('click',async()=>{const em=document.getElementById('inp-novo-comum').value.trim().toLowerCase();if(!em)return;if(low(acesso.emailsAutorizados).includes(em)){toast('Já é admin.');return;}if(!low(acesso.emailsComuns).includes(em))acesso.emailsComuns.push(em);document.getElementById('inp-novo-comum').value='';await saveAcesso();renderUsuarios();toast('Visualizador adicionado.');});
 document.getElementById('btn-sync').addEventListener('click',()=>{if(!msAccount){toast('Entre com o Microsoft primeiro.');return;}sincronizarNuvem(false);});
