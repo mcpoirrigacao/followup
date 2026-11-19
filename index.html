@@ -391,7 +391,7 @@ function withDefaults(s){
   if(!Array.isArray(s.config.equipes)) s.config.equipes=d.config.equipes;
   s.config.fontes=Object.assign({},d.config.fontes,s.config.fontes||{});
   s.config.equipes.forEach(eq=>{
-    eq.linhas=eq.linhas||[]; eq.membros=eq.membros||[]; eq.visualizadores=eq.visualizadores||[]; if(eq.linhasPorEmail===undefined) eq.linhasPorEmail=eq.tipo==='manual'; eq.campos=eq.campos||[]; eq.segmentos=eq.segmentos||[];
+    eq.linhas=eq.linhas||[]; eq.membros=Array.from(new Set((eq.membros||[]).map(limparEmail).filter(Boolean))); eq.visualizadores=Array.from(new Set((eq.visualizadores||[]).map(limparEmail).filter(Boolean))); if(eq.linhasPorEmail===undefined) eq.linhasPorEmail=eq.tipo==='manual'; eq.campos=eq.campos||[]; eq.segmentos=eq.segmentos||[];
     eq.excel=Object.assign({aba:'',colLinha:'',colSeg:'',colRegional:''},eq.excel||{});
     if(eq.id==='sapi'&&!['trein1','trein2'].includes(eq.migr)&&eq.tipo!=='treinamentos'){ // SAPI -> Treinamentos (dados do app de treinamentos)
       eq.nome=(norm(eq.nome)==='SAPI')?'Treinamentos':eq.nome; eq.tipo='treinamentos'; eq.rotuloLinha='Filial'; eq.linhasPorEmail=false; eq.usaRegional=false;
@@ -533,6 +533,8 @@ function cmpRegional(a,b){const ra=rankRegional(a.regional),rb=rankRegional(b.re
   if(ra===9) return 0; const d=norm(a.regional).localeCompare(norm(b.regional)); return d||String(a.nome).localeCompare(String(b.nome),'pt-BR');}
 /* ---- linhas a partir do e-mail de quem preenche: alana.xavier@... -> "alana.xavier" ---- */
 function porEmail(eq){return eq.tipo==='manual'&&eq.linhasPorEmail!==false;}
+/* extrai só o e-mail do que foi digitado/colado (tira ícones, nomes, espaços, <>, ;) e completa @mcpoirrigacao.com → .com.br */
+function limparEmail(x){const m=String(x||'').toLowerCase().match(/[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}/);let e=m?m[0]:'';if(/@mcpoirrigacao\.com$/.test(e))e+='.br';return e;}
 function nomeDoEmail(em){return String(em||'').split('@')[0].trim().toLowerCase();}
 function chaveEmail(em){return norm(nomeDoEmail(em).replace(/[._\-]+/g,' '));}
 /* linha antiga (ex.: "ALANA", "DIEGO SANTOS") que corresponde ao e-mail — só quando é única */
@@ -1168,7 +1170,7 @@ function renderCampos(){
   // visualizadores (equipes integradas)
   body.querySelectorAll('[data-vrem]').forEach(b=>b.onclick=()=>{ const em=eq.visualizadores[+b.dataset.vrem]; if(!confirm(`Remover ${em} da visualização desta equipe?`)) return; eq.visualizadores.splice(+b.dataset.vrem,1); mark(); renderCampos(); });
   const bv=document.getElementById('btn-add-visual'); if(bv) bv.onclick=()=>{
-    const em=document.getElementById('novo-visual').value.trim().toLowerCase(); if(!em||!em.includes('@')){toast('Informe um e-mail válido.');return;}
+    const em=limparEmail(document.getElementById('novo-visual').value); if(!em||!em.includes('@')){toast('Informe um e-mail válido.');return;}
     if(!low(eq.visualizadores).includes(em)) eq.visualizadores.push(em); mark(); renderCampos(); toast('Visualizador adicionado.');
   };
   // membros
@@ -1178,7 +1180,7 @@ function renderCampos(){
     eq.membros.splice(+b.dataset.mrem,1); if(l) l.ativo=false; mark(); renderCampos();
   });
   if(document.getElementById('btn-add-membro')) document.getElementById('btn-add-membro').onclick=()=>{
-    const em=document.getElementById('novo-membro').value.trim().toLowerCase(); if(!em||!em.includes('@')){toast('Informe um e-mail válido.');return;}
+    const em=limparEmail(document.getElementById('novo-membro').value); if(!em||!em.includes('@')){toast('Informe um e-mail válido.');return;}
     const reg=((document.getElementById('novo-membro-reg')||{}).value||'').trim();
     if(!low(eq.membros).includes(em)) eq.membros.push(em);
     const l=vincularMembro(eq,em,reg); mark(); renderCampos(); toast(l?`Adicionado — linha "${l.nome}".`:'Adicionado à equipe.');
@@ -1493,8 +1495,8 @@ document.getElementById('btn-exp-emails').onclick=()=>{
 document.getElementById('btn-cp-editar').onclick=()=>copiarEmails(mapaAcessos().filter(x=>x.editar).map(x=>x.email),'Pode editar · pasta FollowUP');
 document.getElementById('btn-cp-ler').onclick=()=>copiarEmails(mapaAcessos().filter(x=>!x.editar).map(x=>x.email),'Pode exibir · pasta FollowUP');
 document.getElementById('btn-cp-fontes').onclick=()=>copiarEmails(mapaAcessos().filter(x=>x.leitura.size).map(x=>x.email),'Pode exibir · pastas '+[state.config.fontes.pecas.pasta,state.config.fontes.assist.pasta,(state.config.fontes.trein||{}).pasta].filter(Boolean).join(', '));
-document.getElementById('btn-add-admin').addEventListener('click',async()=>{const em=document.getElementById('inp-novo-admin').value.trim().toLowerCase();if(!em)return;if(!low(acesso.emailsAutorizados).includes(em))acesso.emailsAutorizados.push(em);acesso.emailsComuns=acesso.emailsComuns.filter(x=>x.toLowerCase()!==em);document.getElementById('inp-novo-admin').value='';await saveAcesso();renderUsuarios();applyAccess();toast('Admin adicionado.');});
-document.getElementById('btn-add-comum').addEventListener('click',async()=>{const em=document.getElementById('inp-novo-comum').value.trim().toLowerCase();if(!em)return;if(low(acesso.emailsAutorizados).includes(em)){toast('Já é admin.');return;}if(!low(acesso.emailsComuns).includes(em))acesso.emailsComuns.push(em);document.getElementById('inp-novo-comum').value='';await saveAcesso();renderUsuarios();toast('Visualizador adicionado.');});
+document.getElementById('btn-add-admin').addEventListener('click',async()=>{const em=limparEmail(document.getElementById('inp-novo-admin').value);if(!em)return;if(!low(acesso.emailsAutorizados).includes(em))acesso.emailsAutorizados.push(em);acesso.emailsComuns=acesso.emailsComuns.filter(x=>x.toLowerCase()!==em);document.getElementById('inp-novo-admin').value='';await saveAcesso();renderUsuarios();applyAccess();toast('Admin adicionado.');});
+document.getElementById('btn-add-comum').addEventListener('click',async()=>{const em=limparEmail(document.getElementById('inp-novo-comum').value);if(!em)return;if(low(acesso.emailsAutorizados).includes(em)){toast('Já é admin.');return;}if(!low(acesso.emailsComuns).includes(em))acesso.emailsComuns.push(em);document.getElementById('inp-novo-comum').value='';await saveAcesso();renderUsuarios();toast('Visualizador adicionado.');});
 document.getElementById('btn-sync').addEventListener('click',()=>{if(!msAccount){toast('Entre com o Microsoft primeiro.');return;}sincronizarNuvem(false);});
 
 /* ==================== LOGIN / INIT ==================== */
