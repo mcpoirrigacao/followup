@@ -247,7 +247,7 @@ body:not(.is-admin) .somente-admin{display:none !important;}
 
     <div class="card">
       <h3>Usuários &amp; Acesso <span class="h3-side">login Microsoft</span></h3>
-      <div class="note">Quem preenche cada equipe é cadastrado em <b>Equipes &amp; Campos › Quem preenche</b> e vê/edita só a própria equipe. Aqui ficam os <b>administradores</b> (veem e editam tudo) e os <b>visualizadores</b> (veem todas as equipes, sem editar).</div>
+      <div class="note">Quem preenche cada equipe é cadastrado em <b>Equipes &amp; Campos › Quem preenche</b> e vê/edita só a própria equipe. Em <b>Peças</b> e <b>Assistência</b> (dados vindos dos outros apps) o cadastro é <b>Quem visualiza</b>: veem só aquela equipe, sem editar. Aqui ficam os <b>administradores</b> (veem e editam tudo) e os <b>visualizadores</b> (veem todas as equipes, sem editar).</div>
       <div class="sub-label">Administradores</div>
       <div id="lista-admins"></div>
       <div class="add-row"><input type="text" id="inp-novo-admin" placeholder="email@maqcampo.com.br"><button class="btn primary small" id="btn-add-admin" type="button">+ Admin</button></div>
@@ -350,7 +350,7 @@ function withDefaults(s){
   if(!Array.isArray(s.config.equipes)) s.config.equipes=d.config.equipes;
   s.config.fontes=Object.assign({},d.config.fontes,s.config.fontes||{});
   s.config.equipes.forEach(eq=>{
-    eq.linhas=eq.linhas||[]; eq.membros=eq.membros||[]; if(eq.linhasPorEmail===undefined) eq.linhasPorEmail=eq.tipo==='manual'; eq.campos=eq.campos||[]; eq.segmentos=eq.segmentos||[];
+    eq.linhas=eq.linhas||[]; eq.membros=eq.membros||[]; eq.visualizadores=eq.visualizadores||[]; if(eq.linhasPorEmail===undefined) eq.linhasPorEmail=eq.tipo==='manual'; eq.campos=eq.campos||[]; eq.segmentos=eq.segmentos||[];
     eq.excel=Object.assign({aba:'',colLinha:'',colSeg:'',colRegional:''},eq.excel||{});
     eq.campos.forEach(c=>{ c.opcoes=c.opcoes||[]; c.aliases=c.aliases||[]; if(!c.agreg) c.agreg='soma'; if(c.ativo===undefined) c.ativo=true; });
   });
@@ -358,7 +358,7 @@ function withDefaults(s){
 }
 const STORE_KEY='maqcampo-followup-v1';
 let state=load();
-function load(){try{const raw=localStorage.getItem(STORE_KEY);if(raw){const s=JSON.parse(raw);if(s&&s.config&&s.registros)return withDefaults(s);}}catch(e){}return defaultState();}
+function load(){try{const raw=localStorage.getItem(STORE_KEY);if(raw){const s=JSON.parse(raw);if(s&&s.config&&s.registros)return withDefaults(s);}}catch(e){}return withDefaults(defaultState());}
 function save(){stateGen++;try{localStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(e){}if(typeof scheduleCloudSave==='function')scheduleCloudSave();}
 
 /* ============================ HELPERS ============================ */
@@ -607,19 +607,23 @@ setInterval(()=>{ if(msAccount&&!document.hidden) carregarFontes(true); }, 5*60*
 /* ============================ ACESSO ============================ */
 function emailAtual(){return msAccount?(msAccount.username||'').toLowerCase():'';}
 function low(a){return (a||[]).map(x=>String(x).toLowerCase());}
-function ehMembro(eq){return low(eq.membros).includes(emailAtual());}
+function integrada(eq){return eq.tipo!=='manual';}
+/* nas equipes integradas (Peças/Assistência) o preenchimento vem do outro app: só existe "quem visualiza" */
+function ehMembro(eq){return !integrada(eq)&&low(eq.membros).includes(emailAtual());}
+function ehLeitor(eq){return low(eq.visualizadores).includes(emailAtual());}
 function nivelAcesso(){
   if(!msAccount) return msalReady?'deslogado':'local';
   const e=emailAtual();
   if(low(acesso.emailsAutorizados).includes(e)) return 'admin';
-  const algumMembro=state.config.equipes.some(eq=>(eq.membros||[]).length);
+  const algumMembro=state.config.equipes.some(eq=>(eq.membros||[]).length||(eq.visualizadores||[]).length);
   if(!acesso.emailsAutorizados.length&&!acesso.emailsComuns.length&&!algumMembro) return 'admin';
   if(low(acesso.emailsComuns).includes(e)) return 'visualizador';
   if(state.config.equipes.some(ehMembro)) return 'membro';
+  if(state.config.equipes.some(ehLeitor)) return 'leitor';
   return 'bloqueado';
 }
 function isAdmin(){const n_=nivelAcesso();return n_==='admin'||n_==='local';}
-function podeVer(eq){const n_=nivelAcesso();return n_==='admin'||n_==='local'||n_==='visualizador'||ehMembro(eq);}
+function podeVer(eq){const n_=nivelAcesso();return n_==='admin'||n_==='local'||n_==='visualizador'||ehMembro(eq)||ehLeitor(eq);}
 function podeEditar(eq){return isAdmin()||ehMembro(eq);}
 function equipesVisiveis(){return equipes().filter(podeVer);}
 
@@ -903,8 +907,12 @@ function renderCampos(){
     ${fl.filter(x=>!eq.linhas.find(l=>l.id===x.id)).map(x=>`<tr><td>${escapeHtml(x.nome)} <span class="pill auto">do app</span></td>${eq.usaRegional?'<td></td>':''}<td style="text-align:center;"><input type="checkbox" checked data-lapp="${x.id}" data-lappnome="${escapeHtml(x.nome)}"></td><td></td></tr>`).join('')}
     </tbody></table></div>
     ${pe?'':`<div class="add-row"><input type="text" id="cfg-nova-linha" placeholder="Nome">${eq.usaRegional?'<input type="text" id="cfg-nova-linha-reg" placeholder="Regional" style="max-width:140px;min-width:100px;">':''}<button class="btn ghost small" id="cfg-add-linha" type="button">+ Adicionar</button></div>`}</div>`;
-  // membros
-  h+=`<div class="card"><h3>Quem preenche esta equipe <span class="h3-side">e-mails Microsoft — veem e editam só esta equipe</span></h3>
+  // membros / visualizadores
+  if(integrada(eq)) h+=`<div class="card"><h3>Quem visualiza esta equipe <span class="h3-side">e-mails Microsoft — veem só esta equipe, sem editar</span></h3>
+    <div class="note">Os dados de ${eq.tipo==='pecas'?'Peças':'Assistência'} vêm do app ${eq.tipo==='pecas'?'Peças Varejo':'Assistência Técnica'}, por isso não há "quem preenche". Cadastre aqui quem deve acompanhar o painel desta equipe.</div>
+    ${eq.visualizadores.length?eq.visualizadores.map((m,i)=>`<div class="user-row"><span>👁 ${escapeHtml(m)}</span><button class="btn danger small" data-vrem="${i}" type="button">remover</button></div>`).join(''):'<div style="color:var(--texto-suave);font-size:.84rem;">Ninguém cadastrado — veem esta equipe só os administradores e os visualizadores gerais (Parâmetros).</div>'}
+    <div class="add-row"><input type="text" id="novo-visual" placeholder="nome.sobrenome@mcpoirrigacao.com.br"><button class="btn primary small" id="btn-add-visual" type="button">+ Adicionar</button></div></div>`;
+  else h+=`<div class="card"><h3>Quem preenche esta equipe <span class="h3-side">e-mails Microsoft — veem e editam só esta equipe</span></h3>
     ${eq.membros.length?eq.membros.map((m,i)=>{const l=pe?linhaDoMembro(eq,m):null;return `<div class="user-row"><span>👤 ${escapeHtml(m)}${l?` <span class="reg">linha: ${escapeHtml(l.nome)}${l.regional?' · '+escapeHtml(l.regional):''}</span>`:''}</span><button class="btn danger small" data-mrem="${i}" type="button">remover</button></div>`;}).join(''):'<div style="color:var(--texto-suave);font-size:.84rem;">Ninguém cadastrado — só administradores preenchem.</div>'}
     <div class="add-row"><input type="text" id="novo-membro" placeholder="nome.sobrenome@mcpoirrigacao.com.br">${pe&&eq.usaRegional?'<input type="text" id="novo-membro-reg" placeholder="Regional (ex.: R1)" style="max-width:160px;min-width:110px;">':''}<button class="btn primary small" id="btn-add-membro" type="button">+ Adicionar</button></div></div>`;
   // importação
@@ -975,13 +983,19 @@ function renderCampos(){
     if(ex){ex.ativo=true; if(reg) ex.regional=reg;} else eq.linhas.push({id,nome,regional:reg,ativo:true});
     mark(); renderCampos();
   };
+  // visualizadores (equipes integradas)
+  body.querySelectorAll('[data-vrem]').forEach(b=>b.onclick=()=>{ const em=eq.visualizadores[+b.dataset.vrem]; if(!confirm(`Remover ${em} da visualização desta equipe?`)) return; eq.visualizadores.splice(+b.dataset.vrem,1); mark(); renderCampos(); });
+  const bv=document.getElementById('btn-add-visual'); if(bv) bv.onclick=()=>{
+    const em=document.getElementById('novo-visual').value.trim().toLowerCase(); if(!em||!em.includes('@')){toast('Informe um e-mail válido.');return;}
+    if(!low(eq.visualizadores).includes(em)) eq.visualizadores.push(em); mark(); renderCampos(); toast('Visualizador adicionado.');
+  };
   // membros
   body.querySelectorAll('[data-mrem]').forEach(b=>b.onclick=()=>{
     const em=eq.membros[+b.dataset.mrem]; const l=pe?linhaDoMembro(eq,em):null;
     if(!confirm(`Remover ${em} desta equipe?${l?` A linha "${l.nome}" fica inativa (o histórico continua guardado).`:''}`)) return;
     eq.membros.splice(+b.dataset.mrem,1); if(l) l.ativo=false; mark(); renderCampos();
   });
-  document.getElementById('btn-add-membro').onclick=()=>{
+  if(document.getElementById('btn-add-membro')) document.getElementById('btn-add-membro').onclick=()=>{
     const em=document.getElementById('novo-membro').value.trim().toLowerCase(); if(!em||!em.includes('@')){toast('Informe um e-mail válido.');return;}
     const reg=((document.getElementById('novo-membro-reg')||{}).value||'').trim();
     if(!low(eq.membros).includes(em)) eq.membros.push(em);
@@ -1169,7 +1183,7 @@ async function sincronizarNuvem(silencioso){
   carregarFontes(true);
 }
 let _saveTimer=null;
-function scheduleCloudSave(){if(!msAccount||nivelAcesso()==='bloqueado'||nivelAcesso()==='visualizador')return;setSyncStatus('⏳ salvando…','saving');clearTimeout(_saveTimer);_saveTimer=setTimeout(()=>salvarDados(),900);}
+function scheduleCloudSave(){if(!msAccount||['bloqueado','visualizador','leitor'].includes(nivelAcesso()))return;setSyncStatus('⏳ salvando…','saving');clearTimeout(_saveTimer);_saveTimer=setTimeout(()=>salvarDados(),900);}
 async function salvarDados(){
   if(!msAccount)return;if(salvando){pendente=true;return;}salvando=true;await ensureFolder();
   let ok=false,tent=0;
@@ -1195,7 +1209,7 @@ function applyAccess(){
   const adm=isAdmin(); document.body.classList.toggle('is-admin',adm);
   if(adm&&msAccount) sincronizarMembros();
   if(!adm&&['campos','parametros'].includes(abaAtiva())) document.querySelector('#tabs button[data-tab="painel"]').click();
-  const info=document.getElementById('ms-user-info'); if(msAccount){info.textContent='SharePoint › '+SP_PASTA+' · '+({admin:'administrador',visualizador:'visualizador',membro:'equipe: '+state.config.equipes.filter(ehMembro).map(e=>e.nome).join(', ')}[nivel]||'');}
+  const info=document.getElementById('ms-user-info'); if(msAccount){info.textContent='SharePoint › '+SP_PASTA+' · '+({admin:'administrador',visualizador:'visualizador',membro:'equipe: '+state.config.equipes.filter(ehMembro).map(e=>e.nome).join(', ')+(state.config.equipes.some(ehLeitor)?' · visualiza: '+state.config.equipes.filter(ehLeitor).map(e=>e.nome).join(', '):''),leitor:'visualiza: '+state.config.equipes.filter(ehLeitor).map(e=>e.nome).join(', ')}[nivel]||'');}
 }
 function renderUsuarios(){
   const la=document.getElementById('lista-admins');
