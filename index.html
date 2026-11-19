@@ -263,6 +263,8 @@ body:not(.is-admin) .somente-admin{display:none !important;}
         <div class="field"><label>Peças Varejo — arquivo</label><input type="text" id="p-pecas-arq"></div>
         <div class="field"><label>Assistência — pasta</label><input type="text" id="p-ast-pasta"></div>
         <div class="field"><label>Assistência — arquivo</label><input type="text" id="p-ast-arq"></div>
+        <div class="field"><label>Treinamentos — pasta</label><input type="text" id="p-tr-pasta"></div>
+        <div class="field"><label>Treinamentos — arquivo</label><input type="text" id="p-tr-arq"></div>
       </div>
       <div id="fontes-status" class="note"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -310,6 +312,17 @@ const AGREG={soma:'Soma',media:'Média',maximo:'Máximo'};
 function C(nome,tipo,extra){ return Object.assign({id:'c_'+slug(nome),nome,tipo:tipo||'inteiro',opcoes:[],agreg:'soma',meta:0,destaque:false,ativo:true,auto:'',aliases:[]},extra||{}); }
 function A(id,nome,tipo,extra){ return Object.assign(C(nome,tipo,extra),{id,auto:id}); }
 function E(id,nome,o){ return Object.assign({id,nome,tipo:'manual',ativo:true,rotuloLinha:'Linha',usaRegional:false,segmentos:[],linhas:[],membros:[],campos:[],excel:{aba:'',colLinha:'',colSeg:'',colRegional:''}},o); }
+/* Treinamentos: colunas vindas do app TreinamentosMCPO (interno = funcionários, externo = clientes) */
+function camposTreinamentos(atuais){
+  const acha=(nome)=>atuais.find(c=>norm(c.nome)===norm(nome));
+  const mk=(auto,nome,tipo,extra)=>{ const ex=acha(nome); if(ex){ Object.assign(ex,{auto,tipo,ativo:true,removido:false},extra||{}); return ex; } return A(auto,nome,tipo,extra); };
+  const out=[mk('t_hint','TREINAMENTO INTERNO H','horas',{destaque:true}),mk('t_hext','TREINAMENTO EXTERNO H','horas',{destaque:true}),
+    mk('t_pint','PARTICIPAÇÕES INTERNAS','inteiro',{destaque:true}),mk('t_pext','PARTICIPAÇÕES EXTERNAS','inteiro',{destaque:true}),
+    mk('t_cli','CLIENTES CAPACITADOS','inteiro')];
+  atuais.forEach(c=>{ if(!out.includes(c)) out.push(c); });
+  return out;
+}
+const _migrados=[];
 function defaultEquipes(){
   return [
     E('pivo','Pivô (Comercial)',{rotuloLinha:'Vendedor',usaRegional:true,segmentos:['FRIO','MORNO','QUENTE'],
@@ -330,8 +343,8 @@ function defaultEquipes(){
         A('a_media','MÉDIA DIAS EM ABERTO','decimal',{agreg:'media',aliases:['OS - MEDIA ABERTA']}),C('META FAT','moeda',{ativo:false}),C('MANUTENÇÃO',0,{aliases:['MANUTENCAO']}),C('MANUTENÇÃO FECHADA',0,{aliases:['MANURENCAO FECHADA']})]}),
     E('projetos','Projetos',{rotuloLinha:'Projetista',excel:{aba:'PROJETOS',colLinha:'Coluna1',colSeg:'',colRegional:''},
       campos:[C('PROJETOS ENTREGUES',0,{destaque:true,aliases:['PROJETOS ENTRREGUES']}),C('UN','lista',{opcoes:['lance','hectare']}),C('LANCES',0,{destaque:true}),C('REVISADO'),C('PROJETO EXECUTIVO JHAER')]}),
-    E('sapi','SAPI',{rotuloLinha:'Regional',excel:{aba:'SAPI',colLinha:'REGIONAL',colSeg:'',colRegional:''},
-      campos:[C('TREINAMENTO INTERNO H','horas',{destaque:true}),C('TREINAMENTO EXTERNO H','horas',{destaque:true}),C('ACOMPANHAMENTO',0,{destaque:true})]}),
+    E('sapi','Treinamentos',{tipo:'treinamentos',rotuloLinha:'Filial',linhasPorEmail:false,migr:'trein1',excel:{aba:'SAPI',colLinha:'REGIONAL',colSeg:'',colRegional:''},
+      campos:camposTreinamentos([])}),
     E('manejo','Manejo',{rotuloLinha:'Regional',excel:{aba:'MANEJO',colLinha:'REGIONAL',colSeg:'',colRegional:''},
       campos:[C('KM'),C('ENTREGA TÉCNICA',0,{destaque:true}),C('AVALIAÇÃO'),C('MANEJO',0,{destaque:true}),C('APRESENTAÇÕES DE MANEJO'),C('VALORES DE MANEJO','moeda',{destaque:true}),C('PROSPECÇÃO'),C('OS')]}),
     E('csi','CSI',{rotuloLinha:'Departamento',excel:{aba:'CSI',colLinha:'Coluna1',colSeg:'',colRegional:''},
@@ -340,7 +353,7 @@ function defaultEquipes(){
 }
 function defaultState(){
   return { config:{ equipes:defaultEquipes(),
-    fontes:{ pecas:{pasta:'Pecas Varejo',arquivo:'pecas_varejo_dados.json'}, assist:{pasta:'assistencia',arquivo:'assistencia_dados.json'} } },
+    fontes:{ pecas:{pasta:'Pecas Varejo',arquivo:'pecas_varejo_dados.json'}, assist:{pasta:'assistencia',arquivo:'assistencia_dados.json'}, trein:{pasta:'TreinamentosMCPO',arquivo:'treinamentos_dados.json'} } },
     registros:{} };
 }
 function withDefaults(s){
@@ -352,6 +365,11 @@ function withDefaults(s){
   s.config.equipes.forEach(eq=>{
     eq.linhas=eq.linhas||[]; eq.membros=eq.membros||[]; eq.visualizadores=eq.visualizadores||[]; if(eq.linhasPorEmail===undefined) eq.linhasPorEmail=eq.tipo==='manual'; eq.campos=eq.campos||[]; eq.segmentos=eq.segmentos||[];
     eq.excel=Object.assign({aba:'',colLinha:'',colSeg:'',colRegional:''},eq.excel||{});
+    if(eq.id==='sapi'&&eq.migr!=='trein1'){ // SAPI -> Treinamentos (dados do app de treinamentos)
+      eq.nome=(norm(eq.nome)==='SAPI')?'Treinamentos':eq.nome; eq.tipo='treinamentos'; eq.rotuloLinha='Filial'; eq.linhasPorEmail=false; eq.usaRegional=false;
+      eq.visualizadores=Array.from(new Set([...(eq.visualizadores||[]),...eq.membros])); eq.membros=[];
+      eq.linhas.forEach(l=>{ l.ativo=false; }); eq.campos=camposTreinamentos(eq.campos); eq.migr='trein1'; _migrados.push(eq.id);
+    }
     eq.campos.forEach(c=>{ c.opcoes=c.opcoes||[]; c.aliases=c.aliases||[]; if(!c.agreg) c.agreg='soma'; if(c.ativo===undefined) c.ativo=true; });
   });
   return s;
@@ -522,10 +540,11 @@ function ultimaAtualizacao(eq,s){
 }
 
 /* ============================ FONTES EXTERNAS (outros apps) ============================ */
-const ext={pecas:null,assist:null,pecasIdx:{},assistFlow:{},assistSnap:{},pecasLojas:[],assistBases:[],erro:{},quando:null};
+const ext={pecas:null,assist:null,trein:null,treinIdx:{},treinLinhas:[],pecasIdx:{},assistFlow:{},assistSnap:{},pecasLojas:[],assistBases:[],erro:{},quando:null};
 function fonteLinhas(eq){
   if(eq.tipo==='pecas') return ext.pecasLojas.map(nome=>({id:linhaId(eq,nome),nome,regional:''}));
   if(eq.tipo==='assistencia') return ext.assistBases.map(nome=>({id:linhaId(eq,nome),nome,regional:''}));
+  if(eq.tipo==='treinamentos') return ext.treinLinhas.map(nome=>({id:linhaId(eq,nome),nome,regional:''}));
   return [];
 }
 function indexarPecas(data){
@@ -564,8 +583,29 @@ function indexarAssist(data){
   });
   Object.values(ext.assistSnap).forEach(sn=>{ sn.a_media=sn.a_emaberto?Math.round(sn._soma/sn.a_emaberto*10)/10:0; });
 }
+const FONTE={pecas:{nome:'Peças Varejo',curto:'Peças',k:'pecas'},assistencia:{nome:'Assistência Técnica',curto:'Assistência',k:'assist'},treinamentos:{nome:'Treinamentos MCPO',curto:'Treinamentos',k:'trein'}};
+function fonteDe(eq){return FONTE[eq.tipo]||{nome:'',curto:'',k:''};}
+/* app de treinamentos: participações APROVADO/CONCLUÍDO por semana; interno = funcionário (linha = filial), externo = cliente (linha CLIENTES) */
+function indexarTrein(data){
+  ext.trein=data; ext.treinIdx={}; const fake={tipo:'treinamentos'}; const OK=['APROVADO','CONCLUÍDO','CONCLUIDO'];
+  const vivo=o=>o&&!o._del; const P=data.pessoas||{};
+  const fil=new Set(((data.config&&data.config.listas&&data.config.listas.filiais)||[]).filter(Boolean));
+  Object.values(P).forEach(p=>{ if(vivo(p)&&(p.tipo||'Interno')==='Interno'&&p.filial) fil.add(p.filial); });
+  const cli={};
+  Object.values(data.hist||{}).forEach(h=>{
+    if(!vivo(h)||!OK.includes(String(h.situacao||'').toUpperCase())) return; const d=String(h.data||'').slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
+    const pe=P[h.pessoaId]; if(!vivo(pe)) return; const interno=(pe.tipo||'Interno')==='Interno';
+    const nome=interno?(pe.filial||'SEM FILIAL'):'CLIENTES'; if(interno) fil.add(nome);
+    const s=segunda(d), lid=linhaId(fake,nome);
+    const a=((ext.treinIdx[s]=ext.treinIdx[s]||{})[lid]=ext.treinIdx[s][lid]||{t_hint:0,t_hext:0,t_pint:0,t_pext:0,t_cli:0});
+    const hr=Number(String(h.horas==null?'':h.horas).replace(',','.'))||0;
+    if(interno){a.t_hint+=hr;a.t_pint++;} else {a.t_hext+=hr;a.t_pext++; const g=pe.clienteId||('x_'+norm(pe.empresa||pe.nome)); const k=s+'|'+lid; (cli[k]=cli[k]||new Set()).add(g); a.t_cli=cli[k].size;}
+  });
+  ext.treinLinhas=[...Array.from(fil).sort(),'CLIENTES'];
+}
 const SNAP=['a_emaberto','a_pend','a_maisantiga','a_media'];
 function autoVal(eq,s,lId,key){
+  if(key.startsWith('t_')){ if(!ext.trein) return undefined; const x=ext.treinIdx[s]&&ext.treinIdx[s][lId]; return x?x[key]:undefined; }
   if(key.startsWith('p_')){
     if(!ext.pecas) return undefined; const x=ext.pecasIdx[s]&&ext.pecasIdx[s][lId]; if(!x) return undefined;
     return key==='p_ft'?x.ft-x.dv:x[key.slice(2)];
@@ -586,6 +626,9 @@ async function carregarFontes(silencioso){
   if(!ok) ext.erro.pecas='não encontrado';
   const ra=await graphGetJsonEtag(`/${SP_BIBLIOTECA}/${F.assist.pasta}/${F.assist.arquivo}`);
   if(ra.ok&&ra.data&&ra.data.registros) indexarAssist(ra.data); else ext.erro.assist='não encontrado';
+  const T=F.trein||{pasta:'TreinamentosMCPO',arquivo:'treinamentos_dados.json'};
+  const rt=await graphGetJsonEtag(`/${SP_BIBLIOTECA}/${T.pasta}/${T.arquivo}`);
+  if(rt.ok&&rt.data&&rt.data.hist) indexarTrein(rt.data); else ext.erro.trein=rt.ok&&rt.missing?'não encontrado':'sem acesso';
   ext.quando=new Date();
   gravarSnapshots();
   renderAtivo();
@@ -697,7 +740,7 @@ function renderEquipe(eq){
   const filtro=regionalSel?{regional:regionalSel}:{};
   const st=statusPreench(eq,s);
   const ds=nums.filter(c=>c.destaque); const kp=(ds.length?ds:nums).slice(0,8);
-  let html=`<div class="meta-row">${pillStatus(st)} ${eq.tipo!=='manual'?`<span>Campos automáticos vêm do app de ${eq.tipo==='pecas'?'Peças Varejo':'Assistência Técnica'}${ext[eq.tipo==='pecas'?'pecas':'assist']?'':' <b style="color:var(--ferrugem)">(app não carregado — mostrando histórico gravado)</b>'}.</span>`:''}</div>`;
+  let html=`<div class="meta-row">${pillStatus(st)} ${eq.tipo!=='manual'?`<span>Campos automáticos vêm do app de ${fonteDe(eq).nome}${ext[fonteDe(eq).k]?'':' <b style="color:var(--ferrugem)">(app não carregado — mostrando histórico gravado)</b>'}.</span>`:''}</div>`;
   html+=`<div class="totals-strip">`+kp.map((c,i)=>{const v=totalSemana(eq,s,c,filtro), va=totalSemana(eq,ant,c,filtro), meta=n(c.meta);
     const sub=`sem. anterior: ${fmtCurto(c,va)} ${deltaHtml(n(v),n(va))}`+(meta?` · meta ${fmtCurto(c,meta)}`:'');
     return tbox(escapeHtml(c.nome),fmtCurto(c,v),sub,{accent:i===0,sm:c.tipo==='moeda',bar:meta?n(v)/meta:null});}).join('')+`</div>`;
@@ -785,8 +828,8 @@ function renderLanc(){
   const st=statusPreench(eq,s); const u=ultimaAtualizacao(eq,s);
   let html=`<div class="meta-row" id="lanc-meta">${pillStatus(st)}${u?`<span>Último lançamento: ${escapeHtml(u.u||'—')} em ${new Date(u.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>`:''}${pode?'':'<span class="pill pend">somente visualização</span>'}</div>`;
   if(eq.tipo!=='manual'){
-    const nome=eq.tipo==='pecas'?'Peças Varejo':'Assistência Técnica', carregado=!!ext[eq.tipo==='pecas'?'pecas':'assist'];
-    html+=`<div class="note ${carregado?'':'warn'}">As colunas em <b style="color:var(--azul-claro)">verde</b> vêm automaticamente do app <b>${nome}</b> (somadas na semana, por loja). ${carregado?`Leitura feita às ${ext.quando?ext.quando.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):''}.`:'O app ainda não foi lido (faça login) — mostrando o histórico gravado.'}${eq.tipo==='assistencia'?' Indicadores de tempo corrido (em andamento, mais antiga, média, pendente) são da situação atual e ficam gravados como histórico de cada semana.':''} Colunas que o app não informa (ex.: KM RODADO) aparecem zeradas.</div>`;
+    const nome=fonteDe(eq).nome, carregado=!!ext[fonteDe(eq).k];
+    html+=`<div class="note ${carregado?'':'warn'}">As colunas em <b style="color:var(--azul-claro)">verde</b> vêm automaticamente do app <b>${nome}</b> (somadas na semana, ${eq.tipo==='treinamentos'?'por filial; participantes externos/clientes na linha CLIENTES; só participações aprovadas/concluídas':'por loja'}). ${carregado?`Leitura feita às ${ext.quando?ext.quando.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):''}.`:'O app ainda não foi lido (faça login) — mostrando o histórico gravado.'}${eq.tipo==='assistencia'?' Indicadores de tempo corrido (em andamento, mais antiga, média, pendente) são da situação atual e ficam gravados como histórico de cada semana.':''} Colunas que o app não informa (ex.: KM RODADO) aparecem zeradas.</div>`;
   }
   if(!cols.length){ body.innerHTML=html+'<div class="empty">Esta equipe ainda não tem campos. Um administrador pode criá-los em Equipes &amp; Campos.</div>'; return; }
   if(!ls.length){ html+=`<div class="empty">Nenhuma ${escapeHtml((eq.rotuloLinha||'linha').toLowerCase())} cadastrada.</div>`; }
@@ -817,7 +860,7 @@ function renderLanc(){
   }
   if(pode&&porEmail(eq)){
     html+=`<div class="note">As linhas desta equipe vêm dos e-mails cadastrados em <b>Equipes &amp; Campos › Quem preenche</b> (nome = parte antes do @). Para incluir ou retirar alguém, fale com o administrador.</div>`;
-  } else if(pode){
+  } else if(pode&&eq.tipo==='manual'){
     html+=`<div class="card"><h3>Linhas da equipe · ${escapeHtml(eq.rotuloLinha||'Linha')} <span class="h3-side">inclua quem entrou na equipe ou retire quem saiu</span></h3>
       <div class="add-row"><input type="text" id="nova-linha" placeholder="Nome do(a) ${escapeHtml((eq.rotuloLinha||'linha').toLowerCase())}">${eq.usaRegional?`<input type="text" id="nova-linha-reg" placeholder="Regional (ex.: R1)" style="max-width:160px;min-width:120px;">`:''}<button class="btn ghost small" id="btn-add-linha" type="button">+ Adicionar</button></div>
       <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px;">${eq.linhas.filter(l=>l.ativo!==false).map(l=>`<span class="chip" style="cursor:default;">${escapeHtml(l.nome)} <button class="btn icon danger" data-desativa="${l.id}" type="button" title="Retirar da lista (o histórico é mantido)">×</button></span>`).join('')}</div></div>`;
@@ -869,12 +912,12 @@ let cfgEquipe=null;
 function renderCampos(){
   const todas=state.config.equipes;
   if(!cfgEquipe||!eqById(cfgEquipe)) cfgEquipe=(todas[0]||{}).id;
-  document.getElementById('cfg-team-list').innerHTML=todas.map(e=>`<button class="${e.id===cfgEquipe?'active':''}" data-eq="${e.id}" type="button"><span>${escapeHtml(e.nome)}</span><span class="tag">${e.ativo===false?'INATIVA':e.tipo==='pecas'?'APP PEÇAS':e.tipo==='assistencia'?'APP ASSIST.':''}</span></button>`).join('');
+  document.getElementById('cfg-team-list').innerHTML=todas.map(e=>`<button class="${e.id===cfgEquipe?'active':''}" data-eq="${e.id}" type="button"><span>${escapeHtml(e.nome)}</span><span class="tag">${e.ativo===false?'INATIVA':e.tipo==='pecas'?'APP PEÇAS':e.tipo==='assistencia'?'APP ASSIST.':e.tipo==='treinamentos'?'APP TREIN.':''}</span></button>`).join('');
   document.querySelectorAll('#cfg-team-list button').forEach(b=>b.onclick=()=>{cfgEquipe=b.dataset.eq;renderCampos();});
   const eq=eqById(cfgEquipe); const body=document.getElementById('cfg-body');
   if(!eq){body.innerHTML='<div class="empty">Crie uma equipe.</div>';return;}
   const mark=()=>{dirtyConfig.add('eq:'+eq.id);save();};
-  let h=`<div class="card"><h3>Equipe <span class="h3-side">${eq.tipo==='manual'?'preenchimento manual':'integrada ao app de '+(eq.tipo==='pecas'?'Peças Varejo':'Assistência Técnica')}</span></h3>
+  let h=`<div class="card"><h3>Equipe <span class="h3-side">${eq.tipo==='manual'?'preenchimento manual':'integrada ao app de '+fonteDe(eq).nome}</span></h3>
     <div class="grid">
       <div class="field"><label>Nome da equipe</label><input type="text" id="e-nome" value="${escapeHtml(eq.nome)}"></div>
       <div class="field"><label>Cada linha é um(a)…</label><input type="text" id="e-rotulo" value="${escapeHtml(eq.rotuloLinha||'')}" placeholder="Vendedor, Loja, Regional…"></div>
@@ -913,7 +956,7 @@ function renderCampos(){
     ${pe?'':`<div class="add-row"><input type="text" id="cfg-nova-linha" placeholder="Nome">${eq.usaRegional?'<input type="text" id="cfg-nova-linha-reg" placeholder="Regional" style="max-width:140px;min-width:100px;">':''}<button class="btn ghost small" id="cfg-add-linha" type="button">+ Adicionar</button></div>`}</div>`;
   // membros / visualizadores
   if(integrada(eq)) h+=`<div class="card"><h3>Quem visualiza esta equipe <span class="h3-side">e-mails Microsoft — veem só esta equipe, sem editar</span></h3>
-    <div class="note">Os dados de ${eq.tipo==='pecas'?'Peças':'Assistência'} vêm do app ${eq.tipo==='pecas'?'Peças Varejo':'Assistência Técnica'}, por isso não há "quem preenche". Cadastre aqui quem deve acompanhar o painel desta equipe.</div>
+    <div class="note">Os dados de ${fonteDe(eq).curto} vêm do app ${fonteDe(eq).nome}, por isso não há "quem preenche". Cadastre aqui quem deve acompanhar o painel desta equipe.</div>
     ${eq.visualizadores.length?eq.visualizadores.map((m,i)=>`<div class="user-row"><span>👁 ${escapeHtml(m)}</span><button class="btn danger small" data-vrem="${i}" type="button">remover</button></div>`).join(''):'<div style="color:var(--texto-suave);font-size:.84rem;">Ninguém cadastrado — veem esta equipe só os administradores e os visualizadores gerais (Parâmetros).</div>'}
     <div class="add-row"><input type="text" id="novo-visual" placeholder="nome.sobrenome@mcpoirrigacao.com.br"><button class="btn primary small" id="btn-add-visual" type="button">+ Adicionar</button></div></div>`;
   else h+=`<div class="card"><h3>Quem preenche esta equipe <span class="h3-side">e-mails Microsoft — veem e editam só esta equipe</span></h3>
@@ -1034,14 +1077,16 @@ function _renderParametros0(){
   const F=state.config.fontes;
   document.getElementById('p-pecas-pasta').value=F.pecas.pasta; document.getElementById('p-pecas-arq').value=F.pecas.arquivo;
   document.getElementById('p-ast-pasta').value=F.assist.pasta; document.getElementById('p-ast-arq').value=F.assist.arquivo;
+  document.getElementById('p-tr-pasta').value=F.trein.pasta; document.getElementById('p-tr-arq').value=F.trein.arquivo;
   const st=document.getElementById('fontes-status');
   if(!msAccount) st.textContent='Faça login para ler os apps.';
-  else st.innerHTML=`Peças Varejo: ${ext.pecas?`✓ lido (${ext.pecasLojas.length} lojas, ${Object.keys(ext.pecas.lanc||{}).length} lançamentos diários)`:'⚠ '+(ext.erro.pecas||'não lido')} · Assistência: ${ext.assist?`✓ lido (${Object.keys(ext.assist.registros||{}).length} OS)`:'⚠ '+(ext.erro.assist||'não lido')}${ext.quando?' · '+ext.quando.toLocaleTimeString('pt-BR'):''}`;
+  else st.innerHTML=`Peças Varejo: ${ext.pecas?`✓ lido (${ext.pecasLojas.length} lojas, ${Object.keys(ext.pecas.lanc||{}).length} lançamentos diários)`:'⚠ '+(ext.erro.pecas||'não lido')} · Assistência: ${ext.assist?`✓ lido (${Object.keys(ext.assist.registros||{}).length} OS)`:'⚠ '+(ext.erro.assist||'não lido')} · Treinamentos: ${ext.trein?`✓ lido (${Object.keys(ext.trein.hist||{}).length} participações)`:'⚠ '+(ext.erro.trein||'não lido')}${ext.quando?' · '+ext.quando.toLocaleTimeString('pt-BR'):''}`;
 }
 document.getElementById('btn-salvar-fontes').onclick=()=>{
   const F=state.config.fontes;
   F.pecas={pasta:document.getElementById('p-pecas-pasta').value.trim(),arquivo:document.getElementById('p-pecas-arq').value.trim()};
   F.assist={pasta:document.getElementById('p-ast-pasta').value.trim(),arquivo:document.getElementById('p-ast-arq').value.trim()};
+  F.trein={pasta:document.getElementById('p-tr-pasta').value.trim(),arquivo:document.getElementById('p-tr-arq').value.trim()};
   dirtyConfig.add('fontes'); save(); toast('Fontes salvas.'); carregarFontes(true).then(renderParametros);
 };
 document.getElementById('btn-reler-fontes').onclick=()=>{ if(!msAccount){toast('Entre com o Microsoft primeiro.');return;} carregarFontes(false).then(renderParametros); };
@@ -1211,7 +1256,7 @@ function applyAccess(){
   if(nivel==='deslogado'){ovL.style.display='flex';ovN.style.display='none';return;}ovL.style.display='none';
   if(nivel==='bloqueado'){ovN.style.display='flex';document.getElementById('overlay-email-info').textContent='Logado como: '+emailAtual();return;}ovN.style.display='none';
   const adm=isAdmin(); document.body.classList.toggle('is-admin',adm);
-  if(adm&&msAccount) sincronizarMembros();
+  if(adm&&msAccount){ sincronizarMembros(); if(_migrados.length){ _migrados.splice(0).forEach(id=>dirtyConfig.add('eq:'+id)); save(); } }
   if(!adm&&['campos','parametros'].includes(abaAtiva())) document.querySelector('#tabs button[data-tab="painel"]').click();
   const info=document.getElementById('ms-user-info'); if(msAccount){info.textContent='SharePoint › '+SP_PASTA+' · '+({admin:'administrador',visualizador:'visualizador',membro:'equipe: '+state.config.equipes.filter(ehMembro).map(e=>e.nome).join(', ')+(state.config.equipes.some(ehLeitor)?' · visualiza: '+state.config.equipes.filter(ehLeitor).map(e=>e.nome).join(', '):''),leitor:'visualiza: '+state.config.equipes.filter(ehLeitor).map(e=>e.nome).join(', ')}[nivel]||'');}
 }
