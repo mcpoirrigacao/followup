@@ -476,7 +476,10 @@ function valorArmazenado(s,eq,lId,g,c){const r=rec(s,eq.id,lId,g);return r&&r.v?
 /* valor efetivo: campo automático usa o app de origem quando há dado; senão o histórico gravado */
 function valor(s,eq,lId,g,c){
   if(c.auto){ const live=autoVal(eq,s,lId,c.auto); if(live!==undefined) return live; }
-  return valorArmazenado(s,eq,lId,g,c);
+  const v=valorArmazenado(s,eq,lId,g,c);
+  /* equipes integradas: campo sem fonte no outro app (ex.: KM RODADO em Peças) vem zerado; histórico importado é mantido */
+  if(eq.tipo!=='manual'&&isNum(c)&&!temValor(v)) return 0;
+  return v;
 }
 function temValor(v){return !(v===undefined||v===null||v==='');}
 function agregar(lista,agreg){
@@ -783,7 +786,7 @@ function renderLanc(){
   let html=`<div class="meta-row" id="lanc-meta">${pillStatus(st)}${u?`<span>Último lançamento: ${escapeHtml(u.u||'—')} em ${new Date(u.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>`:''}${pode?'':'<span class="pill pend">somente visualização</span>'}</div>`;
   if(eq.tipo!=='manual'){
     const nome=eq.tipo==='pecas'?'Peças Varejo':'Assistência Técnica', carregado=!!ext[eq.tipo==='pecas'?'pecas':'assist'];
-    html+=`<div class="note ${carregado?'':'warn'}">As colunas em <b style="color:var(--azul-claro)">verde</b> vêm automaticamente do app <b>${nome}</b> (somadas na semana, por loja). ${carregado?`Leitura feita às ${ext.quando?ext.quando.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):''}.`:'O app ainda não foi lido (faça login) — mostrando o histórico gravado.'}${eq.tipo==='assistencia'?' Indicadores de tempo corrido (em andamento, mais antiga, média, pendente) são da situação atual e ficam gravados como histórico de cada semana.':''} As demais colunas são preenchidas aqui.</div>`;
+    html+=`<div class="note ${carregado?'':'warn'}">As colunas em <b style="color:var(--azul-claro)">verde</b> vêm automaticamente do app <b>${nome}</b> (somadas na semana, por loja). ${carregado?`Leitura feita às ${ext.quando?ext.quando.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):''}.`:'O app ainda não foi lido (faça login) — mostrando o histórico gravado.'}${eq.tipo==='assistencia'?' Indicadores de tempo corrido (em andamento, mais antiga, média, pendente) são da situação atual e ficam gravados como histórico de cada semana.':''} Colunas que o app não informa (ex.: KM RODADO) aparecem zeradas.</div>`;
   }
   if(!cols.length){ body.innerHTML=html+'<div class="empty">Esta equipe ainda não tem campos. Um administrador pode criá-los em Equipes &amp; Campos.</div>'; return; }
   if(!ls.length){ html+=`<div class="empty">Nenhuma ${escapeHtml((eq.rotuloLinha||'linha').toLowerCase())} cadastrada.</div>`; }
@@ -796,6 +799,7 @@ function renderLanc(){
       cols.forEach(c=>{
         const v=valor(s,eq,l.id,g,c);
         if(c.auto){ const live=autoVal(eq,s,l.id,c.auto)!==undefined; html+=`<td class="auto ${live?'':'hist'}" title="${live?'do app':'histórico gravado'}">${fmt(c,v)}</td>`; return; }
+        if(eq.tipo!=='manual'){ html+=`<td class="auto hist" title="sem informação no app — zerado">${fmt(c,v)}</td>`; return; }
         const val=temValor(v)?v:'';
         const da=`data-l="${l.id}" data-g="${escapeHtml(g)}" data-c="${c.id}"`;
         if(soLeitura){ html+=`<td class="${isNum(c)?'num':''}">${fmt(c,v)}</td>`; return; }
@@ -883,7 +887,7 @@ function renderCampos(){
   vis.forEach((c,i)=>{
     h+=`<tr class="${c.ativo?'':'inativo'}" data-cid="${c.id}">
       <td style="white-space:nowrap;"><button class="btn icon ghost" data-up="${i}" type="button" ${i===0?'disabled':''}>↑</button><button class="btn icon ghost" data-down="${i}" type="button" ${i===vis.length-1?'disabled':''}>↓</button></td>
-      <td><input type="text" data-k="nome" value="${escapeHtml(c.nome)}">${c.auto?'<div style="font-size:.62rem;color:var(--azul-claro);font-weight:700;margin-top:2px;">AUTOMÁTICO (app)</div>':''}</td>
+      <td><input type="text" data-k="nome" value="${escapeHtml(c.nome)}">${c.auto?'<div style="font-size:.62rem;color:var(--azul-claro);font-weight:700;margin-top:2px;">AUTOMÁTICO (app)</div>':eq.tipo!=='manual'?'<div style="font-size:.62rem;color:var(--texto-suave);font-weight:700;margin-top:2px;">SEM FONTE NO APP — ZERADO</div>':''}</td>
       <td>${c.auto?TIPOS[c.tipo]:`<select data-k="tipo">${Object.entries(TIPOS).map(([k,v])=>`<option value="${k}" ${c.tipo===k?'selected':''}>${v}</option>`).join('')}</select>`}</td>
       <td>${c.tipo==='lista'?`<input type="text" data-k="opcoes" value="${escapeHtml(c.opcoes.join(', '))}" placeholder="opção 1, opção 2">`:'<span style="color:var(--texto-suave);font-size:.72rem;">—</span>'}</td>
       <td>${isNum(c)?`<select data-k="agreg">${Object.entries(AGREG).map(([k,v])=>`<option value="${k}" ${c.agreg===k?'selected':''}>${v}</option>`).join('')}</select>`:'—'}</td>
