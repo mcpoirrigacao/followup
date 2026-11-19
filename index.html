@@ -523,8 +523,12 @@ function linhasEquipe(eq,opts){
     for(const r of vistos){
       if(!mapa.has(r.l)){ const cad=eq.linhas.find(x=>x.id===r.l); mapa.set(r.l,cad?{...cad,origem:'hist'}:{id:r.l,nome:r.l.replace(/^l_/,'').replace(/-/g,' ').toUpperCase(),regional:'',origem:'hist'}); } }
   }
-  return Array.from(mapa.values());
+  return Array.from(mapa.values()).sort(cmpRegional);
 }
+/* ordem padrão das linhas: R1 > R2 > outras regionais (A-Z) > sem regional; dentro da regional, por nome */
+function rankRegional(r){const x=norm(r);if(!x)return 9;const m=x.match(/^R\s?(\d+)\b/);if(m)return Number(m[1]);return 100;}
+function cmpRegional(a,b){const ra=rankRegional(a.regional),rb=rankRegional(b.regional);if(ra!==rb)return (ra===9?1e9:ra)-(rb===9?1e9:rb);
+  if(ra===9) return 0; const d=norm(a.regional).localeCompare(norm(b.regional)); return d||String(a.nome).localeCompare(String(b.nome),'pt-BR');}
 /* ---- linhas a partir do e-mail de quem preenche: alana.xavier@... -> "alana.xavier" ---- */
 function porEmail(eq){return eq.tipo==='manual'&&eq.linhasPorEmail!==false;}
 function nomeDoEmail(em){return String(em||'').split('@')[0].trim().toLowerCase();}
@@ -828,6 +832,7 @@ function renderGeral(vis){
   vis.forEach(eq=>{ const manuais=camposAtivos(eq).filter(c=>!c.auto); if(!manuais.length||eq.tipo!=='manual') return;
     linhasEquipe(eq).forEach(l=>{ const ok=segs(eq).some(g=>{const r=rec(s,eq.id,l.id,g);return r&&r.v&&manuais.some(c=>temValor(r.v[c.id]));}); if(!ok) pend.push({eq,l}); }); });
   html+=`<div class="block-title">Pendências da semana</div>`;
+  pend.sort((a,b)=>vis.indexOf(a.eq)-vis.indexOf(b.eq)||cmpRegional(a.l,b.l));
   html+=pend.length?`<div class="card"><div class="tablewrap" style="max-height:340px;"><table class="dt"><thead><tr><th>Equipe</th><th>Linha</th><th>Regional</th></tr></thead><tbody>${pend.map(p=>`<tr><td>${escapeHtml(p.eq.nome)}</td><td class="nome">${escapeHtml(p.l.nome)}</td><td>${p.l.regional?`<span class="reg ${escapeHtml(p.l.regional)}">${escapeHtml(p.l.regional)}</span>`:''}</td></tr>`).join('')}</tbody></table></div></div>`:`<div class="note">Tudo preenchido nesta semana. 👍</div>`;
   const body=document.getElementById('painel-body'); body.innerHTML=html;
   body.querySelectorAll('.team-card').forEach(c=>c.onclick=()=>{painelEquipe=c.dataset.eq;campoSel=null;regionalSel='';renderPainel();window.scrollTo({top:0,behavior:'smooth'});});
@@ -863,7 +868,8 @@ function renderEquipe(eq){
   const ls=linhasEquipe(eq,{semanas:[s]}).filter(l=>!regionalSel||(l.regional||'')===regionalSel);
   const cols=camposAtivos(eq);
   html+=`<div class="card"><h3>Por ${escapeHtml(eq.rotuloLinha||'linha')} · semana <span class="h3-side">${ls.length} linhas</span></h3><div class="tablewrap"><table class="dt">${theadCampos(cols,[`<th>${escapeHtml(eq.rotuloLinha||'Linha')}</th>`,...(eq.usaRegional?['<th>Reg.</th>']:[])],c=>(isNum(c)?'r ':'')+(c.auto?'auto':''))}<tbody>`;
-  const ordenar=c&&isNum(c)?ls.slice().sort((a,b)=>n(totalSemana(eq,s,c,{linhaId:b.id}))-n(totalSemana(eq,s,c,{linhaId:a.id}))):ls;
+  // por regional (R1 > R2 > outras); dentro da regional, maior valor do indicador primeiro
+  const ordenar=c&&isNum(c)?ls.slice().sort((a,b)=>{const ra=rankRegional(a.regional),rb=rankRegional(b.regional); if(ra!==rb||norm(a.regional)!==norm(b.regional)) return cmpRegional(a,b); return n(totalSemana(eq,s,c,{linhaId:b.id}))-n(totalSemana(eq,s,c,{linhaId:a.id}));}):ls;
   ordenar.forEach(l=>{
     html+=`<tr><td class="nome">${escapeHtml(l.nome)}</td>${eq.usaRegional?`<td>${l.regional?`<span class="reg ${escapeHtml(l.regional)}">${escapeHtml(l.regional)}</span>`:''}</td>`:''}${cols.map(cc=>{
       if(isNum(cc)) return `<td class="num">${fmt(cc,totalSemana(eq,s,cc,{linhaId:l.id}))}</td>`;
@@ -936,7 +942,7 @@ function renderLanc(){
   document.querySelectorAll('#lanc-equipes .chip').forEach(b=>b.onclick=()=>{lancEquipe=b.dataset.eq;renderLanc();});
   const body=document.getElementById('lanc-body');
   const eq=eqById(lancEquipe); if(!eq){body.innerHTML='<div class="empty">Nenhuma equipe disponível para você.</div>';return;}
-  const pode=podeEditar(eq); const cols=camposAtivos(eq); const ls=linhasEquipe(eq,{semanas:[s]}).sort((a,b)=>minhaLinha(eq,b)-minhaLinha(eq,a));
+  const pode=podeEditar(eq); const cols=camposAtivos(eq); const ls=linhasEquipe(eq,{semanas:[s]});
   const st=statusPreench(eq,s); const u=ultimaAtualizacao(eq,s);
   let html=`<div class="meta-row" id="lanc-meta">${pillStatus(st)}${u?`<span>Último lançamento: ${escapeHtml(u.u||'—')} em ${new Date(u.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>`:''}${pode?'':'<span class="pill pend">somente visualização</span>'}</div>`;
   if(eq.tipo!=='manual'){
@@ -1065,7 +1071,7 @@ function renderCampos(){
   const fl=fonteLinhas(eq);
   const pe=porEmail(eq);
   const semLinha=pe?eq.membros.filter(em=>!linhaDoMembro(eq,em)):[];
-  const ordLinhas=pe?eq.linhas.slice().sort((a,b)=>(!!b.email-!!a.email)||((b.ativo!==false)-(a.ativo!==false))||a.nome.localeCompare(b.nome)):eq.linhas;
+  const ordLinhas=pe?eq.linhas.slice().sort((a,b)=>(!!b.email-!!a.email)||((b.ativo!==false)-(a.ativo!==false))||cmpRegional(a,b)):eq.linhas.slice().sort(cmpRegional);
   h+=`<div class="card"><h3>Linhas · ${escapeHtml(eq.rotuloLinha||'Linha')} <span class="h3-side">${eq.tipo!=='manual'?'as lojas/bases do app entram sozinhas; aqui dá para incluir outras ou esconder':pe?'criadas a partir dos e-mails de quem preenche':'cada linha é uma linha da tabela de lançamento'}</span></h3>
     ${pe?`<div class="note">O nome de cada linha vem do e-mail cadastrado em <b>Quem preenche</b> (ex.: alana.xavier@mcpoirrigacao.com.br → <b>alana.xavier</b>). Linhas antigas da planilha (sem e-mail) ficam só como histórico; use a coluna <b>E-mail</b> para ligar uma delas a quem preenche e manter o histórico na mesma linha.</div>`:''}
     <div class="tablewrap" style="max-height:420px;"><table class="dt cfg"><thead><tr><th>Nome</th>${pe?'<th>E-mail</th>':''}${eq.usaRegional?'<th>Regional</th>':''}<th>Ativa</th><th></th></tr></thead><tbody>
