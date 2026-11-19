@@ -1311,7 +1311,7 @@ document.getElementById('tabs').addEventListener('click',e=>{
 });
 
 /* ==================== MICROSOFT GRAPH / SHAREPOINT ==================== */
-function getRedirectUri(){const l=window.location;if(l.hostname.includes('sharepoint.com')||l.hostname.includes('onedrive.live.com'))return l.href.replace(/\/[^\/]*$/,'/redirect.html').split('?')[0].split('#')[0];return l.href.split('?')[0].split('#')[0];}
+function getRedirectUri(){const l=window.location;if(l.hostname.includes('sharepoint.com')||l.hostname.includes('onedrive.live.com'))return l.href.replace(/\/[^\/]*$/,'/redirect.html').split('?')[0].split('#')[0];return (l.origin+l.pathname).replace(/index\.html?$/i,'');} /* sempre .../followup/ — mesmo endereço cadastrado no Azure */
 const MSAL_CONFIG={auth:{clientId:'a02d9ccd-9650-4855-99ce-3ad5ec98c381',authority:'https://login.microsoftonline.com/aa796efe-0373-4718-9911-6cbf0bfa260f',redirectUri:getRedirectUri(),postLogoutRedirectUri:getRedirectUri()},cache:{cacheLocation:'localStorage',storeAuthStateInCookie:true}};
 const GRAPH_SCOPES=['Files.ReadWrite','Sites.ReadWrite.All','User.Read'];
 const SP_HOSTNAME='maqcampoirrigacao.sharepoint.com';
