@@ -251,7 +251,7 @@ body:not(.is-admin) .somente-admin{display:none !important;}
   <!-- ============================ PARÂMETROS ============================ -->
   <section class="pane" id="pane-parametros">
     <h2 class="pane-title">⚙ Parâmetros</h2>
-    <p class="pane-desc">Usuários, fontes dos outros apps e importação do histórico da planilha.</p>
+    <p class="pane-desc">Usuários, acessos e fontes dos outros apps.</p>
 
     <div class="card">
       <h3>Usuários &amp; Acesso <span class="h3-side">login Microsoft</span></h3>
@@ -290,7 +290,7 @@ body:not(.is-admin) .somente-admin{display:none !important;}
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="card-importacao" style="display:none;"><!-- importação do histórico: desativada (já realizada) -->
       <h3>Importar histórico da planilha <span class="h3-side">ACOMPANHAMENTO DE VENDAS.xlsx</span></h3>
       <p style="font-size:.84rem;color:var(--texto-suave);margin:0 0 10px;">Lê as abas das equipes (PIVÔ, OFP, PEÇAS, ASSISTENCIA, PROJETOS, SAPI, MANEJO, CSI…) e grava cada linha na semana correspondente. As colunas são casadas com os campos pelo nome. Pode ser repetida: a mesma semana/linha é substituída, não duplicada.</p>
       <div class="add-row" style="align-items:center;">
@@ -1093,7 +1093,7 @@ function renderCampos(){
     ${eq.membros.length?eq.membros.map((m,i)=>{const l=pe?linhaDoMembro(eq,m):null;return `<div class="user-row"><span>👤 ${escapeHtml(m)}${l?` <span class="reg">linha: ${escapeHtml(l.nome)}${l.regional?' · '+escapeHtml(l.regional):''}</span>`:''}</span><button class="btn danger small" data-mrem="${i}" type="button">remover</button></div>`;}).join(''):'<div style="color:var(--texto-suave);font-size:.84rem;">Ninguém cadastrado — só administradores preenchem.</div>'}
     <div class="add-row"><input type="text" id="novo-membro" placeholder="nome.sobrenome@mcpoirrigacao.com.br">${pe&&eq.usaRegional?'<input type="text" id="novo-membro-reg" placeholder="Regional (ex.: R1)" style="max-width:160px;min-width:110px;">':''}<button class="btn primary small" id="btn-add-membro" type="button">+ Adicionar</button></div></div>`;
   // importação
-  h+=`<div class="card"><h3>Importação da planilha <span class="h3-side">usado em Parâmetros › Importar histórico</span></h3><div class="grid">
+  h+=`<div class="card" style="display:none;"><h3>Importação da planilha <span class="h3-side">usado em Parâmetros › Importar histórico</span></h3><div class="grid">
     <div class="field"><label>Aba do Excel</label><input type="text" id="x-aba" value="${escapeHtml(eq.excel.aba)}"></div>
     <div class="field"><label>Coluna da linha</label><input type="text" id="x-lin" value="${escapeHtml(eq.excel.colLinha)}"></div>
     <div class="field"><label>Coluna do segmento</label><input type="text" id="x-seg" value="${escapeHtml(eq.excel.colSeg)}"></div>
