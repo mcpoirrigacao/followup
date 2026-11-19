@@ -393,7 +393,7 @@ function withDefaults(s){
   s.config.equipes.forEach(eq=>{
     eq.linhas=eq.linhas||[]; eq.membros=eq.membros||[]; eq.visualizadores=eq.visualizadores||[]; if(eq.linhasPorEmail===undefined) eq.linhasPorEmail=eq.tipo==='manual'; eq.campos=eq.campos||[]; eq.segmentos=eq.segmentos||[];
     eq.excel=Object.assign({aba:'',colLinha:'',colSeg:'',colRegional:''},eq.excel||{});
-    if(eq.id==='sapi'&&eq.migr!=='trein1'){ // SAPI -> Treinamentos (dados do app de treinamentos)
+    if(eq.id==='sapi'&&!['trein1','trein2'].includes(eq.migr)&&eq.tipo!=='treinamentos'){ // SAPI -> Treinamentos (dados do app de treinamentos)
       eq.nome=(norm(eq.nome)==='SAPI')?'Treinamentos':eq.nome; eq.tipo='treinamentos'; eq.rotuloLinha='Filial'; eq.linhasPorEmail=false; eq.usaRegional=false;
       eq.visualizadores=Array.from(new Set([...(eq.visualizadores||[]),...eq.membros])); eq.membros=[];
       eq.linhas.forEach(l=>{ l.ativo=false; }); eq.campos=camposTreinamentos(eq.campos); eq.migr='trein1'; _migrados.push(eq.id);
@@ -779,7 +779,8 @@ function nivelAcesso(){
   const e=emailAtual();
   if(low(acesso.emailsAutorizados).includes(e)) return 'admin';
   const algumMembro=state.config.equipes.some(eq=>(eq.membros||[]).length||(eq.visualizadores||[]).length);
-  if(!acesso.emailsAutorizados.length&&!acesso.emailsComuns.length&&!algumMembro) return 'admin';
+  if(!acessoOk||!nuvemOk) return 'semnuvem';
+  if(!acessoExiste&&!dadosExiste&&!acesso.emailsAutorizados.length&&!acesso.emailsComuns.length&&!algumMembro) return 'admin'; // só na 1ª instalação real
   if(low(acesso.emailsComuns).includes(e)) return 'visualizador';
   if(state.config.equipes.some(ehMembro)) return 'membro';
   if(state.config.equipes.some(ehLeitor)) return 'leitor';
@@ -1230,6 +1231,7 @@ document.getElementById('btn-export-json').onclick=()=>download(`followup_backup
 let importPend=null;
 document.getElementById('inp-xlsx').addEventListener('change',async e=>{
   const f=e.target.files[0]; if(!f) return;
+  if(msAccount&&!nuvemOk){ toast('Aguarde carregar os dados do SharePoint antes de importar.'); e.target.value=''; return; }
   const box=document.getElementById('import-preview'); box.innerHTML='<div class="note">Lendo planilha…</div>';
   try{ await loadXlsx(); const wb=XLSX.read(await f.arrayBuffer(),{type:'array',cellDates:true}); importPend=analisarPlanilha(wb,document.getElementById('chk-criar-campos').checked,document.getElementById('chk-seg-dom').checked); mostrarPrevia(); }
   catch(err){ box.innerHTML=`<div class="note warn">Não foi possível ler: ${escapeHtml(err.message||String(err))}</div>`; }
@@ -1338,7 +1340,7 @@ async function getSiteId(){if(_siteId)return _siteId;const t=await getGraphToken
 async function spDriveUrl(fp){const s=await getSiteId();if(!s)return null;return `https://graph.microsoft.com/v1.0/sites/${s}/drive/root:${spEncodePath(fp)}`;}
 async function getGraphToken(){if(!msalInstance||!msAccount)return null;try{const r=await msalInstance.acquireTokenSilent({scopes:GRAPH_SCOPES,account:msAccount});return r.accessToken;}catch(e){try{const r=await msalInstance.acquireTokenPopup({scopes:GRAPH_SCOPES});return r.accessToken;}catch(e2){return null;}}}
 async function graphGetJsonEtag(fp){const t=await getGraphToken();if(!t)return {ok:false};const base=await spDriveUrl(fp);if(!base)return {ok:false};try{const m=await fetch(base,{headers:{Authorization:'Bearer '+t}});if(m.status===404)return {ok:true,missing:true,data:null,etag:null};if(!m.ok)return {ok:false};const mj=await m.json();const etag=mj.eTag||mj.cTag||m.headers.get('ETag')||null;const c=await fetch(base+':/content',{headers:{Authorization:'Bearer '+t}});if(!c.ok)return {ok:false};return {ok:true,data:await c.json(),etag};}catch(e){return {ok:false};}}
-async function graphPutEtag(fp,body,etag){const t=await getGraphToken();if(!t)return {ok:false,status:0};const base=await spDriveUrl(fp);if(!base)return {ok:false,status:0};const h={Authorization:'Bearer '+t,'Content-Type':'application/octet-stream'};if(etag)h['If-Match']=etag;try{const r=await fetch(base+':/content',{method:'PUT',headers:h,body});let ne=r.headers.get('ETag');if(r.ok){try{const j=await r.json();ne=j.eTag||j.cTag||ne;}catch(e){}}return {ok:r.ok,status:r.status,etag:ne};}catch(e){return {ok:false,status:0};}}
+async function graphPutEtag(fp,body,etag){const t=await getGraphToken();if(!t)return {ok:false,status:0};const base=await spDriveUrl(fp);if(!base)return {ok:false,status:0};const h={Authorization:'Bearer '+t,'Content-Type':'application/octet-stream'};if(etag)h['If-Match']=etag;try{const r=await fetch(base+':/content'+(etag?'':'?@microsoft.graph.conflictBehavior=fail'),{method:'PUT',headers:h,body});let ne=r.headers.get('ETag');if(r.ok){try{const j=await r.json();ne=j.eTag||j.cTag||ne;}catch(e){}}return {ok:r.ok,status:r.status,etag:ne};}catch(e){return {ok:false,status:0};}}
 let _pastaOk=false;
 async function ensureFolder(){if(_pastaOk)return true;const t=await getGraphToken();if(!t)return false;const base=await spDriveUrl(`/${SP_BIBLIOTECA}`);if(!base)return false;try{await fetch(base+':/children',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json'},body:JSON.stringify({name:SP_PASTA,folder:{},'@microsoft.graph.conflictBehavior':'fail'})});}catch(e){}_pastaOk=true;return true;}
 
@@ -1387,23 +1389,28 @@ function aplicarLocalSobre(base){
   return res;
 }
 function renderRemoto(){ const a=document.activeElement; if(a&&(a.tagName==='INPUT'||a.tagName==='SELECT')&&abaAtiva()!=='painel') return; renderAll(); }
+/* nuvemOk: só fica true depois de LER o SharePoint com sucesso (ou confirmar que o arquivo ainda não existe).
+   Sem isso o app NÃO grava nada — evita que uma falha de leitura (ex.: sem permissão na pasta) seja tratada como "pasta vazia". */
+let nuvemOk=false, acessoOk=false, acessoExiste=true, dadosExiste=true;
 async function sincronizarNuvem(silencioso){
   if(!msAccount)return;
   const ac=await graphGetJsonEtag(spPath(ACESSO_FILE));
-  if(ac.ok&&ac.data&&(ac.data.emailsAutorizados||ac.data.emailsComuns)){acesso={emailsAutorizados:ac.data.emailsAutorizados||[],emailsComuns:ac.data.emailsComuns||[]};acessoEtag=ac.etag;}
+  if(ac.ok&&ac.missing){acessoOk=true;acessoExiste=false;}
+  else if(ac.ok&&ac.data){acesso={emailsAutorizados:ac.data.emailsAutorizados||[],emailsComuns:ac.data.emailsComuns||[]};acessoEtag=ac.etag;acessoOk=true;acessoExiste=true;}
   const dd=await graphGetJsonEtag(spPath(DADOS_FILE));
-  if(dd.ok&&dd.data&&dd.data.config&&dd.data.registros){state=dirtyCount()?aplicarLocalSobre(dd.data):withDefaults(dd.data);stateGen++;cloudEtag=dd.etag;try{localStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(e){}}
-  else if(dd.ok&&dd.missing){cloudEtag=null;}
+  if(dd.ok&&dd.data&&dd.data.config&&dd.data.registros){state=dirtyCount()?aplicarLocalSobre(dd.data):withDefaults(dd.data);stateGen++;cloudEtag=dd.etag;nuvemOk=true;dadosExiste=true;try{localStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(e){}}
+  else if(dd.ok&&dd.missing){cloudEtag=null;nuvemOk=true;dadosExiste=false;}
+  if(!acessoOk||!nuvemOk){ applyAccess(); setSyncStatus('⚠ sem acesso à pasta FollowUP','warn'); toast('Não foi possível ler a pasta FollowUP no SharePoint. Nada será gravado até a leitura funcionar.'); setTimeout(()=>sincronizarNuvem(true),20000); return; }
   applyAccess(); renderRemoto(); setSyncStatus('☁ conectado','ok'); if(!silencioso)toast('Dados atualizados da nuvem.'); startPolling();
   if(dirtyCount()) scheduleCloudSave(); // pendências que ficaram no aparelho (ex.: página fechada antes de salvar)
   carregarFontes(true);
 }
 let _saveTimer=null;
-function scheduleCloudSave(){if(!msAccount||['bloqueado','visualizador','leitor'].includes(nivelAcesso()))return;setSyncStatus('⏳ salvando…','saving');clearTimeout(_saveTimer);_saveTimer=setTimeout(()=>salvarDados(),900);}
+function scheduleCloudSave(){if(!msAccount||!nuvemOk||['bloqueado','visualizador','leitor','semnuvem'].includes(nivelAcesso()))return;setSyncStatus('⏳ salvando…','saving');clearTimeout(_saveTimer);_saveTimer=setTimeout(()=>salvarDados(),900);}
 const espera=ms=>new Promise(r=>setTimeout(r,ms));
 let _retryTimer=null;
 async function salvarDados(){
-  if(!msAccount||['bloqueado','visualizador','leitor'].includes(nivelAcesso()))return;
+  if(!msAccount||!nuvemOk||['bloqueado','visualizador','leitor','semnuvem'].includes(nivelAcesso()))return;
   if(salvando){pendente=true;return;} if(!dirtyCount()){setSyncStatus('☁ salvo','ok');return;}
   salvando=true; clearTimeout(_retryTimer); await ensureFolder();
   let ok=false,tent=0,mesclou=false;
@@ -1429,13 +1436,16 @@ let _pollTimer=null;
 function startPolling(){clearInterval(_pollTimer);_pollTimer=setInterval(puxarSeMudou,15000);}
 async function puxarSeMudou(){if(!msAccount||salvando)return;if(dirtyCount())return;const a=document.activeElement;if(a&&(a.tagName==='INPUT'||a.tagName==='SELECT'))return;const dd=await graphGetJsonEtag(spPath(DADOS_FILE));if(dd.ok&&dd.etag&&dd.etag!==cloudEtag&&dd.data&&dd.data.config){state=withDefaults(dd.data);stateGen++;cloudEtag=dd.etag;try{localStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(e){}applyAccess();renderRemoto();setSyncStatus('⟳ atualizado agora','ok');}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)puxarSeMudou();});
-async function saveAcesso(){if(!msAccount){toast('Entre com o Microsoft para gerenciar usuários.');return;}await ensureFolder();let ok=false,tent=0;const uni=(a,b)=>Array.from(new Set([...(a||[]),...(b||[])]));while(tent<5&&!ok){tent++;const res=await graphPutEtag(spPath(ACESSO_FILE),new TextEncoder().encode(JSON.stringify(acesso)),acessoEtag);if(res.ok){acessoEtag=res.etag||acessoEtag;ok=true;}else if(res.status===412||res.status===409){const ac=await graphGetJsonEtag(spPath(ACESSO_FILE));if(ac.ok&&ac.data){acesso.emailsAutorizados=uni(ac.data.emailsAutorizados,acesso.emailsAutorizados);acesso.emailsComuns=uni(ac.data.emailsComuns,acesso.emailsComuns).filter(e=>!acesso.emailsAutorizados.includes(e));acessoEtag=ac.etag;}else break;}else break;}if(!ok)toast('⚠ Não foi possível salvar os usuários.');}
+async function saveAcesso(){if(!msAccount){toast('Entre com o Microsoft para gerenciar usuários.');return;}if(!acessoOk){toast('⚠ Sem leitura da pasta FollowUP — usuários não foram salvos.');return;}await ensureFolder();let ok=false,tent=0;const uni=(a,b)=>Array.from(new Set([...(a||[]),...(b||[])]));while(tent<5&&!ok){tent++;const res=await graphPutEtag(spPath(ACESSO_FILE),new TextEncoder().encode(JSON.stringify(acesso)),acessoEtag);if(res.ok){acessoEtag=res.etag||acessoEtag;ok=true;}else if(res.status===412||res.status===409){const ac=await graphGetJsonEtag(spPath(ACESSO_FILE));if(ac.ok&&ac.data){acesso.emailsAutorizados=uni(ac.data.emailsAutorizados,acesso.emailsAutorizados);acesso.emailsComuns=uni(ac.data.emailsComuns,acesso.emailsComuns).filter(e=>!acesso.emailsAutorizados.includes(e));acessoEtag=ac.etag;}else break;}else break;}if(!ok)toast('⚠ Não foi possível salvar os usuários.');}
 
 /* ==================== CONTROLE DE ACESSO ==================== */
 function applyAccess(){
   const nivel=nivelAcesso();const ovL=document.getElementById('overlay-login'),ovN=document.getElementById('overlay-negado');
   if(nivel==='deslogado'){ovL.style.display='flex';ovN.style.display='none';return;}ovL.style.display='none';
-  if(nivel==='bloqueado'){ovN.style.display='flex';document.getElementById('overlay-email-info').textContent='Logado como: '+emailAtual();return;}ovN.style.display='none';
+  if(nivel==='bloqueado'||nivel==='semnuvem'){ovN.style.display='flex';
+    ovN.querySelector('h2').textContent=nivel==='semnuvem'?'Sem acesso à pasta':'Acesso Restrito';
+    ovN.querySelector('p').textContent=nivel==='semnuvem'?'Não foi possível ler a pasta FollowUP no SharePoint com a sua conta. Peça ao administrador para liberar o acesso à pasta. O app tenta de novo sozinho.':'Seu e-mail não está cadastrado em nenhuma equipe. Peça a um administrador para liberar.';
+    document.getElementById('overlay-email-info').textContent='Logado como: '+emailAtual();return;}ovN.style.display='none';
   const adm=isAdmin(); document.body.classList.toggle('is-admin',adm);
   if(adm&&msAccount){ sincronizarMembros(); if(_migrados.length){ _migrados.splice(0).forEach(id=>marcarCfg('eq:'+id)); _migRegs.splice(0).forEach(k=>marcarReg(k)); save(); } }
   if(!adm&&['campos','parametros'].includes(abaAtiva())) document.querySelector('#tabs button[data-tab="painel"]').click();
