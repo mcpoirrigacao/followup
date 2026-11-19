@@ -75,6 +75,12 @@ p.pane-desc{color:var(--texto-suave);font-size:.86rem;margin:0 0 16px;}
 table.dt{width:100%;border-collapse:collapse;font-size:.8rem;}
 table.dt th{text-align:left;background:var(--azul-escuro);color:#fff;padding:8px 7px;font-size:.64rem;text-transform:uppercase;letter-spacing:.3px;position:sticky;top:0;z-index:1;}
 table.dt th.r,table.dt td.r{text-align:right;}
+table.dt th.grp-h{text-align:center;background:var(--azul);border-left:2px solid #fff;border-bottom:1px solid rgba(255,255,255,.35);font-size:.68rem;letter-spacing:.8px;height:28px;}
+table.dt tr.h2 th{top:28px;font-size:.6rem;background:#0b6a19;}
+table.dt tr.h2 th.gs{border-left:2px solid #fff;}
+table.dt tr.h2 th.auto{background:var(--azul-claro);}
+tr.grp-row td{background:#eef6ef;font-weight:700;color:var(--azul-escuro);font-size:.8rem;letter-spacing:.5px;}
+tr.grp-item td:nth-child(2){padding-left:18px;}
 table.dt td{padding:6px 7px;border-bottom:1px solid var(--areia-escura);vertical-align:middle;}
 table.dt tr:hover td{background:#fbf7ef;}
 table.dt td.num{font-family:var(--fonte-dado);text-align:right;white-space:nowrap;}
@@ -86,8 +92,8 @@ table.dt input:focus,table.dt select:focus{outline:2px solid var(--azul-claro);o
 table.dt td.auto{font-family:var(--fonte-dado);text-align:right;color:var(--azul-escuro);background:#eef6ef;}
 table.dt td.auto.hist{background:#f6f1e6;color:var(--texto-suave);}
 table.dt th.auto{background:var(--azul-claro);}
-#lanc-body table.dt td:first-child,#lanc-body table.dt th:first-child,#painel-body table.dt td.nome:first-child{position:sticky;left:0;z-index:2;background:#fff;box-shadow:1px 0 0 var(--areia-escura);}
-#lanc-body table.dt th:first-child{background:var(--azul-escuro);z-index:3;}
+#lanc-body table.dt td:first-child,#lanc-body table.dt thead tr:first-child th:first-child,#painel-body table.dt td.nome:first-child{position:sticky;left:0;z-index:2;background:#fff;box-shadow:1px 0 0 var(--areia-escura);}
+#lanc-body table.dt thead tr:first-child th:first-child{background:var(--azul-escuro);z-index:4;vertical-align:middle;}
 #lanc-body table.dt tr.total-row td:first-child,#painel-body table.dt tr.total-row td:first-child{background:var(--areia-escura);}
 .tablewrap{overflow:auto;border:1px solid var(--borda);border-radius:6px;max-height:70vh;}
 .reg{display:inline-block;font-size:.62rem;padding:2px 6px;border-radius:3px;font-weight:700;letter-spacing:.3px;background:#e4f1e6;color:var(--azul-claro);}
@@ -370,6 +376,12 @@ function withDefaults(s){
       eq.visualizadores=Array.from(new Set([...(eq.visualizadores||[]),...eq.membros])); eq.membros=[];
       eq.linhas.forEach(l=>{ l.ativo=false; }); eq.campos=camposTreinamentos(eq.campos); eq.migr='trein1'; _migrados.push(eq.id);
     }
+    if(eq.id==='pivo'&&eq.migrGrp!=='g1'){
+      const G={'CARRETEL UNIDADE':'CARRETEL','CARRETEL VALOR':'CARRETEL','PEÇAS':'PEÇAS','PEÇAS FATURADO':'PEÇAS','QTDE LANCES':'PIVÔ','VALOR PIVÔ':'PIVÔ','IRRICONTROL':'IRRICONTROL','VALOR IRRICONTROL':'IRRICONTROL'};
+      ['CACAU','GRÃOS','AÇAÍ','CITRUS','CANA','CAFÉ','PASTAGEM','GOTEJO'].forEach(x=>{G[x]=x;G['VALOR '+x]=x;});
+      eq.campos.forEach(c=>{ if(!c.grupo){ const k=Object.keys(G).find(k=>norm(k)===norm(c.nome)); if(k) c.grupo=G[k]; } });
+      ordenarGrupos(eq); eq.migrGrp='g1'; _migrados.push(eq.id);
+    }
     eq.campos.forEach(c=>{ c.opcoes=c.opcoes||[]; c.aliases=c.aliases||[]; if(!c.agreg) c.agreg='soma'; if(c.ativo===undefined) c.ativo=true; });
   });
   return s;
@@ -440,7 +452,22 @@ function semanasPeriodo(){
 /* ============================ EQUIPES / LINHAS / VALORES ============================ */
 function equipes(){return state.config.equipes.filter(e=>e.ativo!==false);}
 function eqById(id){return state.config.equipes.find(e=>e.id===id);}
-function camposAtivos(eq){return eq.campos.filter(c=>c.ativo&&!c.removido);}
+/* ---- subgrupos de campos (ex.: CACAU > CACAU | VALOR CACAU) ---- */
+function grp(c){return String(c.grupo||'').trim();}
+function blocos(lista){const out=[],map={};lista.forEach(c=>{const g=grp(c);const k=norm(g);if(g&&map[k]){map[k].itens.push(c);return;}const b={g,itens:[c]};out.push(b);if(g)map[k]=b;});return out;}
+function ordenarGrupos(eq){eq.campos=blocos(eq.campos).flatMap(b=>b.itens);}
+function subRotulo(c){const g=grp(c);if(!g)return c.nome;const tg=new Set(norm(g).split(' '));const r=String(c.nome).split(/\s+/).filter(t=>!tg.has(norm(t))).join(' ').trim();return r||(c.tipo==='moeda'?'VALOR':'QTDE');}
+function gruposEquipe(eq){return Array.from(new Set(eq.campos.filter(c=>!c.removido).map(grp).filter(Boolean)));}
+/* cabeçalho de tabela com 2 níveis quando há subgrupos; esquerda = colunas fixas (rowspan) */
+function theadCampos(cols,esquerda,thCls){
+  thCls=thCls||(c=>isNum(c)?'r':'');
+  if(!cols.some(grp)) return `<thead><tr>${esquerda.join('')}${cols.map(c=>`<th class="${thCls(c)}">${escapeHtml(c.nome)}</th>`).join('')}</tr></thead>`;
+  const bl=blocos(cols); const l1=esquerda.map(x=>x.replace('<th','<th rowspan="2"')).join('');
+  const r1=bl.map(b=>b.g?`<th colspan="${b.itens.length}" class="grp-h">${escapeHtml(b.g)}</th>`:`<th rowspan="2" class="${thCls(b.itens[0])}">${escapeHtml(b.itens[0].nome)}</th>`).join('');
+  const r2=bl.filter(b=>b.g).map(b=>b.itens.map((c,i)=>`<th class="${thCls(c)} sub${i===0?' gs':''}">${escapeHtml(subRotulo(c))}</th>`).join('')).join('');
+  return `<thead><tr class="h1">${l1}${r1}</tr><tr class="h2">${r2}</tr></thead>`;
+}
+function camposAtivos(eq){return blocos(eq.campos.filter(c=>c.ativo&&!c.removido)).flatMap(b=>b.itens);}
 function camposNum(eq){return camposAtivos(eq).filter(isNum);}
 function normLoja(s){let x=norm(s);x=x.replace(/^R\s?\d+\s+/,'');const p=semAcento(String(s)).toUpperCase().replace(/^R\s?\d+\s*-\s*/,'').split(' - ')[0];return norm(p)||x;}
 function linhaId(eq,nome){return 'l_'+slug(eq.tipo==='manual'?norm(nome):normLoja(nome));}
@@ -751,7 +778,7 @@ function renderEquipe(eq){
   // tabela por linha na semana
   const ls=linhasEquipe(eq,{semanas:[s]}).filter(l=>!regionalSel||(l.regional||'')===regionalSel);
   const cols=camposAtivos(eq);
-  html+=`<div class="card"><h3>Por ${escapeHtml(eq.rotuloLinha||'linha')} · semana <span class="h3-side">${ls.length} linhas</span></h3><div class="tablewrap"><table class="dt"><thead><tr><th>${escapeHtml(eq.rotuloLinha||'Linha')}</th>${eq.usaRegional?'<th>Reg.</th>':''}${cols.map(c=>`<th class="${isNum(c)?'r':''} ${c.auto?'auto':''}">${escapeHtml(c.nome)}</th>`).join('')}</tr></thead><tbody>`;
+  html+=`<div class="card"><h3>Por ${escapeHtml(eq.rotuloLinha||'linha')} · semana <span class="h3-side">${ls.length} linhas</span></h3><div class="tablewrap"><table class="dt">${theadCampos(cols,[`<th>${escapeHtml(eq.rotuloLinha||'Linha')}</th>`,...(eq.usaRegional?['<th>Reg.</th>']:[])],c=>(isNum(c)?'r ':'')+(c.auto?'auto':''))}<tbody>`;
   const ordenar=c&&isNum(c)?ls.slice().sort((a,b)=>n(totalSemana(eq,s,c,{linhaId:b.id}))-n(totalSemana(eq,s,c,{linhaId:a.id}))):ls;
   ordenar.forEach(l=>{
     html+=`<tr><td class="nome">${escapeHtml(l.nome)}</td>${eq.usaRegional?`<td>${l.regional?`<span class="reg ${escapeHtml(l.regional)}">${escapeHtml(l.regional)}</span>`:''}</td>`:''}${cols.map(cc=>{
@@ -761,10 +788,10 @@ function renderEquipe(eq){
   html+=`<tr class="total-row"><td>TOTAL</td>${eq.usaRegional?'<td></td>':''}${cols.map(cc=>isNum(cc)?`<td class="num">${fmt(cc,totalSemana(eq,s,cc,filtro))}</td>`:'<td></td>').join('')}</tr></tbody></table></div></div>`;
   // segmentos
   if(segs(eq).length>1){
-    html+=`<div class="card"><h3>Por ${eq.segmentos.length?'temperatura / segmento':'segmento'} · semana</h3><div class="tablewrap"><table class="dt"><thead><tr><th>Segmento</th>${nums.map(cc=>`<th class="r">${escapeHtml(cc.nome)}</th>`).join('')}</tr></thead><tbody>${eq.segmentos.map((g,i)=>`<tr><td class="nome"><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${SEG_CORES[i%5]};margin-right:6px;"></i>${escapeHtml(g)}</td>${nums.map(cc=>`<td class="num">${fmt(cc,totalSemana(eq,s,cc,Object.assign({seg:g},filtro)))}</td>`).join('')}</tr>`).join('')}<tr class="total-row"><td>TOTAL</td>${nums.map(cc=>`<td class="num">${fmt(cc,totalSemana(eq,s,cc,filtro))}</td>`).join('')}</tr></tbody></table></div></div>`;
+    html+=`<div class="card"><h3>Por ${eq.segmentos.length?'temperatura / segmento':'segmento'} · semana</h3><div class="tablewrap"><table class="dt">${theadCampos(nums,['<th>Segmento</th>'])}<tbody>${eq.segmentos.map((g,i)=>`<tr><td class="nome"><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${SEG_CORES[i%5]};margin-right:6px;"></i>${escapeHtml(g)}</td>${nums.map(cc=>`<td class="num">${fmt(cc,totalSemana(eq,s,cc,Object.assign({seg:g},filtro)))}</td>`).join('')}</tr>`).join('')}<tr class="total-row"><td>TOTAL</td>${nums.map(cc=>`<td class="num">${fmt(cc,totalSemana(eq,s,cc,filtro))}</td>`).join('')}</tr></tbody></table></div></div>`;
   }
   // semanas x campos
-  html+=`<div class="card"><h3>Histórico semanal <span class="h3-side"><button class="btn ghost small" id="btn-csv" type="button">⬇ Exportar CSV</button></span></h3><div class="tablewrap"><table class="dt"><thead><tr><th>Semana</th>${nums.map(cc=>`<th class="r">${escapeHtml(cc.nome)}</th>`).join('')}</tr></thead><tbody>`;
+  html+=`<div class="card"><h3>Histórico semanal <span class="h3-side"><button class="btn ghost small" id="btn-csv" type="button">⬇ Exportar CSV</button></span></h3><div class="tablewrap"><table class="dt">${theadCampos(nums,['<th>Semana</th>'])}<tbody>`;
   per.slice().reverse().forEach(w=>{ html+=`<tr${w===s?' style="font-weight:700"':''}><td class="nome">${ddmm(w)} <span style="color:var(--texto-suave);font-weight:400;font-size:.7rem;">S${numSemana(w)}</span></td>${nums.map(cc=>`<td class="num">${fmt(cc,totalSemana(eq,w,cc,filtro))}</td>`).join('')}</tr>`; });
   html+=`<tr class="total-row"><td>PERÍODO</td>${nums.map(cc=>`<td class="num">${fmt(cc,totalPeriodo(eq,per,cc,filtro))}</td>`).join('')}</tr></tbody></table></div></div>`;
   const body=document.getElementById('painel-body'); body.innerHTML=html;
@@ -835,7 +862,7 @@ function renderLanc(){
   if(!ls.length){ html+=`<div class="empty">Nenhuma ${escapeHtml((eq.rotuloLinha||'linha').toLowerCase())} cadastrada.</div>`; }
   segs(eq).forEach((g,gi)=>{
     if(g) html+=`<div class="seg-title"><i style="background:${SEG_CORES[gi%5]}"></i>${escapeHtml(g)}</div>`;
-    html+=`<div class="card" style="padding:10px;"><div class="tablewrap"><table class="dt" data-seg="${escapeHtml(g)}"><thead><tr><th>${escapeHtml(eq.rotuloLinha||'Linha')}</th>${eq.usaRegional?'<th>Reg.</th>':''}${cols.map(c=>`<th class="${isNum(c)?'r':''} ${c.auto?'auto':''}" title="${c.auto?'automático':''}">${escapeHtml(c.nome)}</th>`).join('')}</tr></thead><tbody>`;
+    html+=`<div class="card" style="padding:10px;"><div class="tablewrap"><table class="dt" data-seg="${escapeHtml(g)}">${theadCampos(cols,[`<th>${escapeHtml(eq.rotuloLinha||'Linha')}</th>`,...(eq.usaRegional?['<th>Reg.</th>']:[])],c=>(isNum(c)?'r ':'')+(c.auto?'auto':''))}<tbody>`;
     ls.forEach(l=>{
       const soLeitura=!pode||!linhaEditavel(eq,l);
       html+=`<tr><td class="nome">${escapeHtml(l.nome)}${porEmail(eq)&&!linhaEditavel(eq,l)?` <span class="pill pend" title="${l.email?'E-mail removido de Quem preenche — linha inativa':'Linha antiga sem e-mail — ligue a um e-mail em Equipes &amp; Campos para editar'}">${l.email?'inativo':'histórico'}</span>`:''}</td>${eq.usaRegional?`<td>${l.regional?`<span class="reg ${escapeHtml(l.regional)}">${escapeHtml(l.regional)}</span>`:''}</td>`:''}`;
@@ -856,7 +883,7 @@ function renderLanc(){
   });
   if(segs(eq).length>1){
     const nums=camposNum(eq);
-    html+=`<div class="card" style="padding:10px;"><div class="tablewrap"><table class="dt"><thead><tr><th>TOTAL GERAL</th>${nums.map(c=>`<th class="r">${escapeHtml(c.nome)}</th>`).join('')}</tr></thead><tbody><tr class="total-row" id="lanc-total-geral"><td>Todas</td>${nums.map(c=>`<td class="num" data-tc="${c.id}">${fmt(c,totalSemana(eq,s,c))}</td>`).join('')}</tr></tbody></table></div></div>`;
+    html+=`<div class="card" style="padding:10px;"><div class="tablewrap"><table class="dt">${theadCampos(nums,['<th>TOTAL GERAL</th>'])}<tbody><tr class="total-row" id="lanc-total-geral"><td>Todas</td>${nums.map(c=>`<td class="num" data-tc="${c.id}">${fmt(c,totalSemana(eq,s,c))}</td>`).join('')}</tr></tbody></table></div></div>`;
   }
   if(pode&&porEmail(eq)){
     html+=`<div class="note">As linhas desta equipe vêm dos e-mails cadastrados em <b>Equipes &amp; Campos › Quem preenche</b> (nome = parte antes do @). Para incluir ou retirar alguém, fale com o administrador.</div>`;
@@ -925,12 +952,16 @@ function renderCampos(){
       <div class="field"><label>&nbsp;</label><label class="check"><input type="checkbox" id="e-reg" ${eq.usaRegional?'checked':''}> usa Regional nas linhas</label><label class="check"><input type="checkbox" id="e-ativo" ${eq.ativo!==false?'checked':''}> equipe ativa</label>${eq.tipo==='manual'?`<label class="check"><input type="checkbox" id="e-email" ${porEmail(eq)?'checked':''}> nome da linha vem do e-mail de quem preenche</label>`:''}</div>
     </div></div>`;
   // campos
-  h+=`<div class="card"><h3>Campos que a equipe preenche <span class="h3-side">desmarque "Ativo" para esconder sem perder o histórico</span></h3><div class="tablewrap" style="max-height:none;"><table class="dt cfg"><thead><tr><th></th><th>Campo</th><th>Tipo</th><th>Opções (lista)</th><th>Total da equipe</th><th class="r">Meta semanal</th><th>Destaque</th><th>Ativo</th><th></th></tr></thead><tbody>`;
-  const vis=eq.campos.filter(c=>!c.removido);
-  vis.forEach((c,i)=>{
-    h+=`<tr class="${c.ativo?'':'inativo'}" data-cid="${c.id}">
-      <td style="white-space:nowrap;"><button class="btn icon ghost" data-up="${i}" type="button" ${i===0?'disabled':''}>↑</button><button class="btn icon ghost" data-down="${i}" type="button" ${i===vis.length-1?'disabled':''}>↓</button></td>
+  h+=`<div class="card"><h3>Campos que a equipe preenche <span class="h3-side">desmarque "Ativo" para esconder sem perder o histórico</span></h3><div class="tablewrap" style="max-height:none;"><table class="dt cfg"><thead><tr><th></th><th>Campo</th><th>Subgrupo</th><th>Tipo</th><th>Opções (lista)</th><th>Total da equipe</th><th class="r">Meta semanal</th><th>Destaque</th><th>Ativo</th><th></th></tr></thead><tbody>`;
+  ordenarGrupos(eq);
+  const vis=eq.campos.filter(c=>!c.removido); const bls=blocos(vis);
+  bls.forEach((b,bi)=>{
+   if(b.g) h+=`<tr class="grp-row" data-grp="${escapeHtml(b.g)}"><td style="white-space:nowrap;"><button class="btn icon ghost" data-gup="${bi}" type="button" ${bi===0?'disabled':''} title="Subir o subgrupo">↑</button><button class="btn icon ghost" data-gdown="${bi}" type="button" ${bi===bls.length-1?'disabled':''} title="Descer o subgrupo">↓</button></td><td colspan="9">▸ ${escapeHtml(b.g)} <span style="font-weight:400;color:var(--texto-suave);">(${b.itens.length} ${b.itens.length===1?'item':'itens'})</span> <button class="btn ghost small" data-gadd="${escapeHtml(b.g)}" type="button" style="margin-left:8px;">+ item em ${escapeHtml(b.g)}</button></td></tr>`;
+   b.itens.forEach((c,ii)=>{ const i=vis.indexOf(c); const solo=!b.g;
+    h+=`<tr class="${c.ativo?'':'inativo'} ${b.g?'grp-item':''}" data-cid="${c.id}">
+      <td style="white-space:nowrap;"><button class="btn icon ghost" ${solo?`data-gup="${bi}"`:`data-up="${i}"`} type="button" ${(solo?bi===0:ii===0)?'disabled':''}>↑</button><button class="btn icon ghost" ${solo?`data-gdown="${bi}"`:`data-down="${i}"`} type="button" ${(solo?bi===bls.length-1:ii===b.itens.length-1)?'disabled':''}>↓</button></td>
       <td><input type="text" data-k="nome" value="${escapeHtml(c.nome)}">${c.auto?'<div style="font-size:.62rem;color:var(--azul-claro);font-weight:700;margin-top:2px;">AUTOMÁTICO (app)</div>':eq.tipo!=='manual'?'<div style="font-size:.62rem;color:var(--texto-suave);font-weight:700;margin-top:2px;">SEM FONTE NO APP — ZERADO</div>':''}</td>
+      <td><input type="text" data-k="grupo" list="dl-grupos" value="${escapeHtml(grp(c))}" placeholder="—" style="min-width:90px;"></td>
       <td>${c.auto?TIPOS[c.tipo]:`<select data-k="tipo">${Object.entries(TIPOS).map(([k,v])=>`<option value="${k}" ${c.tipo===k?'selected':''}>${v}</option>`).join('')}</select>`}</td>
       <td>${c.tipo==='lista'?`<input type="text" data-k="opcoes" value="${escapeHtml(c.opcoes.join(', '))}" placeholder="opção 1, opção 2">`:'<span style="color:var(--texto-suave);font-size:.72rem;">—</span>'}</td>
       <td>${isNum(c)?`<select data-k="agreg">${Object.entries(AGREG).map(([k,v])=>`<option value="${k}" ${c.agreg===k?'selected':''}>${v}</option>`).join('')}</select>`:'—'}</td>
@@ -938,9 +969,10 @@ function renderCampos(){
       <td style="text-align:center;">${isNum(c)?`<input type="checkbox" data-k="destaque" ${c.destaque?'checked':''}>`:''}</td>
       <td style="text-align:center;"><input type="checkbox" data-k="ativo" ${c.ativo?'checked':''}></td>
       <td>${c.auto?'':`<button class="btn icon danger" data-rem="${c.id}" type="button" title="Remover campo">🗑</button>`}</td></tr>`;
+   });
   });
   h+=`</tbody></table></div>
-    <div class="add-row"><input type="text" id="novo-campo" placeholder="Nome do novo campo"><select class="sel" id="novo-campo-tipo">${Object.entries(TIPOS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select><button class="btn primary small" id="btn-add-campo" type="button">+ Adicionar campo</button></div>
+    <div class="add-row"><input type="text" id="novo-campo" placeholder="Nome do novo campo"><input type="text" id="novo-campo-grupo" list="dl-grupos" placeholder="Subgrupo (opcional)" style="max-width:190px;min-width:130px;"><datalist id="dl-grupos">${gruposEquipe(eq).map(g=>`<option value="${escapeHtml(g)}">`).join('')}</datalist><select class="sel" id="novo-campo-tipo">${Object.entries(TIPOS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select><button class="btn primary small" id="btn-add-campo" type="button">+ Adicionar campo</button></div>
     <div class="note">"Destaque" coloca o campo nos quadros do Painel. "Total da equipe" define como somar as linhas (soma, média ou máximo). Remover um campo que já tem dados apenas o esconde — o histórico fica guardado.</div></div>`;
   // linhas
   const fl=fonteLinhas(eq);
@@ -984,12 +1016,17 @@ function renderCampos(){
   body.querySelectorAll('tr[data-cid] [data-k]').forEach(el=>el.addEventListener('change',()=>{
     const c=eq.campos.find(x=>x.id===el.closest('tr').dataset.cid); const k=el.dataset.k;
     if(k==='nome') c.nome=el.value.trim()||c.nome;
+    else if(k==='grupo'){ const v=el.value.trim().toUpperCase(); const ex=gruposEquipe(eq).find(g=>norm(g)===norm(v)); c.grupo=ex||v; ordenarGrupos(eq); }
     else if(k==='opcoes') c.opcoes=el.value.split(',').map(x=>x.trim()).filter(Boolean);
     else if(k==='meta') c.meta=el.value===''?0:Number(el.value);
     else if(k==='destaque'||k==='ativo') c[k]=el.checked;
     else c[k]=el.value;
     mark(); renderCampos();
   }));
+  const moverGrupo=(bi,d)=>{ const bl=blocos(eq.campos.filter(c=>!c.removido)); const a=bl[bi], b=bl[bi+d]; if(!a||!b) return; bl[bi]=b; bl[bi+d]=a; eq.campos=[...bl.flatMap(x=>x.itens),...eq.campos.filter(c=>c.removido)]; mark(); renderCampos(); };
+  body.querySelectorAll('[data-gup]').forEach(b=>b.onclick=()=>moverGrupo(+b.dataset.gup,-1));
+  body.querySelectorAll('[data-gdown]').forEach(b=>b.onclick=()=>moverGrupo(+b.dataset.gdown,1));
+  body.querySelectorAll('[data-gadd]').forEach(b=>b.onclick=()=>{ document.getElementById('novo-campo-grupo').value=b.dataset.gadd; const nc=document.getElementById('novo-campo'); nc.value=''; nc.placeholder='Nome do item em '+b.dataset.gadd+' (ex.: ÁREA '+b.dataset.gadd+')'; nc.scrollIntoView({block:'center'}); nc.focus(); });
   const mover=(i,d)=>{const arr=eq.campos.filter(c=>!c.removido); const a=arr[i], b=arr[i+d]; if(!a||!b) return; const ia=eq.campos.indexOf(a), ib=eq.campos.indexOf(b); eq.campos[ia]=b; eq.campos[ib]=a; mark(); renderCampos();};
   body.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>mover(+b.dataset.up,-1));
   body.querySelectorAll('[data-down]').forEach(b=>b.onclick=()=>mover(+b.dataset.down,1));
@@ -1004,7 +1041,9 @@ function renderCampos(){
     const nome=document.getElementById('novo-campo').value.trim(); if(!nome) return;
     const ex=eq.campos.find(c=>norm(c.nome)===norm(nome));
     if(ex){ if(ex.removido||!ex.ativo){ex.removido=false;ex.ativo=true;mark();renderCampos();toast('Campo reativado.');} else toast('Já existe um campo com esse nome.'); return; }
-    eq.campos.push(Object.assign(C(nome,document.getElementById('novo-campo-tipo').value),{id:uid('c_')}));
+    const gv=document.getElementById('novo-campo-grupo').value.trim().toUpperCase(); const gex=gruposEquipe(eq).find(g=>norm(g)===norm(gv));
+    eq.campos.push(Object.assign(C(nome,document.getElementById('novo-campo-tipo').value),{id:uid('c_'),grupo:gex||gv}));
+    ordenarGrupos(eq);
     mark(); renderCampos(); toast('Campo adicionado.');
   };
   // linhas
