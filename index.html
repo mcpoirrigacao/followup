@@ -339,7 +339,7 @@ function camposTreinamentos(atuais){
   atuais.forEach(c=>{ if(!out.includes(c)) out.push(c); });
   return out;
 }
-const _migrados=[];
+const _migrados=[], _migRegs=[];
 function defaultEquipes(){
   return [
     E('pivo','Pivô (Comercial)',{rotuloLinha:'Vendedor',usaRegional:true,segmentos:['FRIO','MORNO','QUENTE'],
@@ -360,7 +360,7 @@ function defaultEquipes(){
         A('a_media','MÉDIA DIAS EM ABERTO','decimal',{agreg:'media',aliases:['OS - MEDIA ABERTA']}),C('META FAT','moeda',{ativo:false}),C('MANUTENÇÃO',0,{aliases:['MANUTENCAO']}),C('MANUTENÇÃO FECHADA',0,{aliases:['MANURENCAO FECHADA']})]}),
     E('projetos','Projetos',{rotuloLinha:'Projetista',excel:{aba:'PROJETOS',colLinha:'Coluna1',colSeg:'',colRegional:''},
       campos:[C('PROJETOS ENTREGUES',0,{destaque:true,aliases:['PROJETOS ENTRREGUES']}),C('UN','lista',{opcoes:['lance','hectare']}),C('LANCES',0,{destaque:true}),C('REVISADO'),C('PROJETO EXECUTIVO JHAER')]}),
-    E('sapi','Treinamentos',{tipo:'treinamentos',rotuloLinha:'Filial',linhasPorEmail:false,migr:'trein1',excel:{aba:'SAPI',colLinha:'REGIONAL',colSeg:'',colRegional:''},
+    E('sapi','Treinamentos',{tipo:'treinamentos',rotuloLinha:'Total',linhasPorEmail:false,migr:'trein2',excel:{aba:'SAPI',colLinha:'REGIONAL',colSeg:'',colRegional:''},
       campos:camposTreinamentos([])}),
     E('manejo','Manejo',{rotuloLinha:'Regional',excel:{aba:'MANEJO',colLinha:'REGIONAL',colSeg:'',colRegional:''},
       campos:[C('KM'),C('ENTREGA TÉCNICA',0,{destaque:true}),C('AVALIAÇÃO'),C('MANEJO',0,{destaque:true}),C('APRESENTAÇÕES DE MANEJO'),C('VALORES DE MANEJO','moeda',{destaque:true}),C('PROSPECÇÃO'),C('OS')]}),
@@ -386,6 +386,16 @@ function withDefaults(s){
       eq.nome=(norm(eq.nome)==='SAPI')?'Treinamentos':eq.nome; eq.tipo='treinamentos'; eq.rotuloLinha='Filial'; eq.linhasPorEmail=false; eq.usaRegional=false;
       eq.visualizadores=Array.from(new Set([...(eq.visualizadores||[]),...eq.membros])); eq.membros=[];
       eq.linhas.forEach(l=>{ l.ativo=false; }); eq.campos=camposTreinamentos(eq.campos); eq.migr='trein1'; _migrados.push(eq.id);
+    }
+    if(eq.id==='sapi'&&eq.tipo==='treinamentos'&&eq.migr==='trein1'){ // só totais: sem divisão por filial e sem ACOMPANHAMENTO
+      eq.rotuloLinha='Total';
+      eq.campos.forEach(c=>{ if(norm(c.nome)==='ACOMPANHAMENTO'){ c.ativo=false; c.removido=true; } });
+      eq.linhas=[]; const alvo='l_mcpo';
+      Object.keys(s.registros).forEach(k=>{ const r=s.registros[k]; if(r.e!==eq.id||r.l===alvo) return;
+        const nk=rkey(r.s,eq.id,alvo,''); const d=s.registros[nk]||(s.registros[nk]={s:r.s,e:eq.id,l:alvo,g:'',v:{},u:r.u,t:r.t});
+        Object.entries(r.v||{}).forEach(([cid,v])=>{ d.v[cid]=(typeof v==='number'&&typeof d.v[cid]==='number')?d.v[cid]+v:(d.v[cid]??v); });
+        delete s.registros[k]; _migRegs.push(k,nk); });
+      eq.migr='trein2'; _migrados.push(eq.id);
     }
     if(eq.id==='pivo'&&eq.migrGrp!=='g1'){
       const G={'CARRETEL UNIDADE':'CARRETEL','CARRETEL VALOR':'CARRETEL','PEÇAS':'PEÇAS','PEÇAS FATURADO':'PEÇAS','QTDE LANCES':'PIVÔ','VALOR PIVÔ':'PIVÔ','IRRICONTROL':'IRRICONTROL','VALOR IRRICONTROL':'IRRICONTROL'};
@@ -641,13 +651,12 @@ function indexarTrein(data){
   Object.values(data.hist||{}).forEach(h=>{
     if(!vivo(h)||!OK.includes(String(h.situacao||'').toUpperCase())) return; const d=String(h.data||'').slice(0,10); if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return;
     const pe=P[h.pessoaId]; if(!vivo(pe)) return; const interno=(pe.tipo||'Interno')==='Interno';
-    const nome=interno?(pe.filial||'SEM FILIAL'):'CLIENTES'; if(interno) fil.add(nome);
-    const s=segunda(d), lid=linhaId(fake,nome);
+    const s=segunda(d), lid=linhaId(fake,'MCPO');
     const a=((ext.treinIdx[s]=ext.treinIdx[s]||{})[lid]=ext.treinIdx[s][lid]||{t_hint:0,t_hext:0,t_pint:0,t_pext:0,t_cli:0});
     const hr=Number(String(h.horas==null?'':h.horas).replace(',','.'))||0;
     if(interno){a.t_hint+=hr;a.t_pint++;} else {a.t_hext+=hr;a.t_pext++; const g=pe.clienteId||('x_'+norm(pe.empresa||pe.nome)); const k=s+'|'+lid; (cli[k]=cli[k]||new Set()).add(g); a.t_cli=cli[k].size;}
   });
-  ext.treinLinhas=[...Array.from(fil).sort(),'CLIENTES'];
+  ext.treinLinhas=['MCPO'];
 }
 const SNAP=['a_emaberto','a_pend','a_maisantiga','a_media'];
 /* ---- Resumo de faturamento e regionais (Assistência) — mesma regra do app: faturado = NFS-e + data de faturamento;
@@ -916,7 +925,7 @@ function renderLanc(){
   let html=`<div class="meta-row" id="lanc-meta">${pillStatus(st)}${u?`<span>Último lançamento: ${escapeHtml(u.u||'—')} em ${new Date(u.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>`:''}${pode?'':'<span class="pill pend">somente visualização</span>'}</div>`;
   if(eq.tipo!=='manual'){
     const nome=fonteDe(eq).nome, carregado=!!ext[fonteDe(eq).k];
-    html+=`<div class="note ${carregado?'':'warn'}">As colunas em <b style="color:var(--azul-claro)">verde</b> vêm automaticamente do app <b>${nome}</b> (somadas na semana, ${eq.tipo==='treinamentos'?'por filial; participantes externos/clientes na linha CLIENTES; só participações aprovadas/concluídas':'por loja'}). ${carregado?`Leitura feita às ${ext.quando?ext.quando.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):''}.`:'O app ainda não foi lido (faça login) — mostrando o histórico gravado.'}${eq.tipo==='assistencia'?' Indicadores de tempo corrido (em andamento, mais antiga, média, pendente) são da situação atual e ficam gravados como histórico de cada semana.':''} Colunas que o app não informa (ex.: KM RODADO) aparecem zeradas.</div>`;
+    html+=`<div class="note ${carregado?'':'warn'}">As colunas em <b style="color:var(--azul-claro)">verde</b> vêm automaticamente do app <b>${nome}</b> (somadas na semana, ${eq.tipo==='treinamentos'?'total da empresa; interno = funcionários, externo = clientes; só participações aprovadas/concluídas':'por loja'}). ${carregado?`Leitura feita às ${ext.quando?ext.quando.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):''}.`:'O app ainda não foi lido (faça login) — mostrando o histórico gravado.'}${eq.tipo==='assistencia'?' Indicadores de tempo corrido (em andamento, mais antiga, média, pendente) são da situação atual e ficam gravados como histórico de cada semana.':''} Colunas que o app não informa (ex.: KM RODADO) aparecem zeradas.</div>`;
   }
   if(!cols.length){ body.innerHTML=html+'<div class="empty">Esta equipe ainda não tem campos. Um administrador pode criá-los em Equipes &amp; Campos.</div>'; return; }
   if(!ls.length){ html+=`<div class="empty">Nenhuma ${escapeHtml((eq.rotuloLinha||'linha').toLowerCase())} cadastrada.</div>`; }
@@ -1231,7 +1240,7 @@ function analisarPlanilha(wb,criarCampos){
       let ln=iL>=0?row[iL]:'GERAL'; if(ln==null||ln===''||ln===0||norm(ln)==='TOTAL') continue; ln=String(ln).trim(); if(eq.tipo==='manual'&&/^r\d$/i.test(ln)) ln=ln.toUpperCase();
       const vals=mapa.filter(m=>row[m.i]!=null&&row[m.i]!=='');
       if(!vals.length) continue;
-      let lid=linhaId(eq,ln);
+      let lid=eq.tipo==='treinamentos'?'l_mcpo':linhaId(eq,ln);
       if(porEmail(eq)){ const c=eq.linhas.filter(x=>x.email&&casaNomeEmail(ln,x.email)); if(c.length===1) lid=c[0].id; }
       const s=segunda(d), g=iS>=0&&eq.segmentos.length?String(row[iS]||'').trim().toUpperCase():'';
       if(eq.segmentos.length&&!eq.segmentos.includes(g)) continue;
@@ -1240,7 +1249,7 @@ function analisarPlanilha(wb,criarCampos){
         else v=String(v).trim();
         if(isNum(c)&&temValor(reg.v[c.id])) reg.v[c.id]=c.agreg==='soma'?n(reg.v[c.id])+v:Math.max(n(reg.v[c.id]),v); else reg.v[c.id]=v; });
       n_++; semanas.add(s);
-      const nomeExib=eq.tipo==='manual'?ln:normLoja(ln);
+      const nomeExib=eq.tipo==='treinamentos'?'MCPO':eq.tipo==='manual'?ln:normLoja(ln);
       const reg_=iR>=0&&row[iR]?String(row[iR]).trim().toUpperCase():'';
       const prev=linhasVistas.get(lid); if(!prev||s>prev.ultima) linhasVistas.set(lid,{nome:nomeExib,regional:reg_||(prev&&prev.regional)||'',ultima:s});
     }
@@ -1357,7 +1366,7 @@ function applyAccess(){
   if(nivel==='deslogado'){ovL.style.display='flex';ovN.style.display='none';return;}ovL.style.display='none';
   if(nivel==='bloqueado'){ovN.style.display='flex';document.getElementById('overlay-email-info').textContent='Logado como: '+emailAtual();return;}ovN.style.display='none';
   const adm=isAdmin(); document.body.classList.toggle('is-admin',adm);
-  if(adm&&msAccount){ sincronizarMembros(); if(_migrados.length){ _migrados.splice(0).forEach(id=>dirtyConfig.add('eq:'+id)); save(); } }
+  if(adm&&msAccount){ sincronizarMembros(); if(_migrados.length){ _migrados.splice(0).forEach(id=>dirtyConfig.add('eq:'+id)); _migRegs.splice(0).forEach(k=>dirtyReg.add(k)); save(); } }
   if(!adm&&['campos','parametros'].includes(abaAtiva())) document.querySelector('#tabs button[data-tab="painel"]').click();
   const info=document.getElementById('ms-user-info'); if(msAccount){info.textContent='SharePoint › '+SP_PASTA+' · '+({admin:'administrador',visualizador:'visualizador',membro:'equipe: '+state.config.equipes.filter(ehMembro).map(e=>e.nome).join(', ')+(state.config.equipes.some(ehLeitor)?' · visualiza: '+state.config.equipes.filter(ehLeitor).map(e=>e.nome).join(', '):''),leitor:'visualiza: '+state.config.equipes.filter(ehLeitor).map(e=>e.nome).join(', ')}[nivel]||'');}
 }
