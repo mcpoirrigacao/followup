@@ -85,6 +85,8 @@ table.dt td{padding:6px 7px;border-bottom:1px solid var(--areia-escura);vertical
 table.dt tr:hover td{background:#fbf7ef;}
 table.dt td.num{font-family:var(--fonte-dado);text-align:right;white-space:nowrap;}
 table.dt td.nome{font-weight:600;white-space:nowrap;}
+table.dt tr.minha td{background:#f2f8f2;}
+#lanc-body table.dt tr.minha td:first-child{background:#e4f1e6;box-shadow:inset 3px 0 0 var(--ferrugem),1px 0 0 var(--areia-escura);}
 table.dt tr.total-row td{background:var(--areia-escura);font-weight:700;color:var(--azul-escuro);border-top:2px solid var(--azul-escuro);}
 table.dt input[type=number],table.dt input[type=text],table.dt select{width:100%;min-width:84px;padding:5px 6px;border:1px solid var(--borda);border-radius:4px;font-size:.8rem;background:#fffdf9;}
 table.dt input[type=number]{text-align:right;font-family:var(--fonte-dado);}
@@ -493,7 +495,13 @@ function nomeDoEmail(em){return String(em||'').split('@')[0].trim().toLowerCase(
 function chaveEmail(em){return norm(nomeDoEmail(em).replace(/[._\-]+/g,' '));}
 /* linha antiga (ex.: "ALANA", "DIEGO SANTOS") que corresponde ao e-mail — só quando é única */
 function casaNomeEmail(nome,em){const a=chaveEmail(em),b=norm(nome);return !!b&&(a===b||a.startsWith(b+' '));}
-function linhaEditavel(eq,l){ if(!porEmail(eq)) return true; return !!l.email&&l.ativo!==false&&low(eq.membros).includes(l.email.toLowerCase()); }
+/* linha que o usuário pode editar: admin edita qualquer linha ativa; quem preenche edita só a própria linha (do seu e-mail) */
+function linhaEditavel(eq,l){
+  if(!porEmail(eq)) return true;
+  if(!(!!l.email&&l.ativo!==false&&low(eq.membros).includes(l.email.toLowerCase()))) return false;
+  return isAdmin()||l.email.toLowerCase()===emailAtual();
+}
+function minhaLinha(eq,l){return !!emailAtual()&&!!l.email&&l.email.toLowerCase()===emailAtual();}
 function linhaDoMembro(eq,em){em=String(em).toLowerCase();return eq.linhas.find(l=>(l.email||'').toLowerCase()===em);}
 function vincularMembro(eq,em,reg){
   em=String(em).toLowerCase(); if(!porEmail(eq)) return null;
@@ -851,7 +859,7 @@ function renderLanc(){
   document.querySelectorAll('#lanc-equipes .chip').forEach(b=>b.onclick=()=>{lancEquipe=b.dataset.eq;renderLanc();});
   const body=document.getElementById('lanc-body');
   const eq=eqById(lancEquipe); if(!eq){body.innerHTML='<div class="empty">Nenhuma equipe disponível para você.</div>';return;}
-  const pode=podeEditar(eq); const cols=camposAtivos(eq); const ls=linhasEquipe(eq,{semanas:[s]});
+  const pode=podeEditar(eq); const cols=camposAtivos(eq); const ls=linhasEquipe(eq,{semanas:[s]}).sort((a,b)=>minhaLinha(eq,b)-minhaLinha(eq,a));
   const st=statusPreench(eq,s); const u=ultimaAtualizacao(eq,s);
   let html=`<div class="meta-row" id="lanc-meta">${pillStatus(st)}${u?`<span>Último lançamento: ${escapeHtml(u.u||'—')} em ${new Date(u.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>`:''}${pode?'':'<span class="pill pend">somente visualização</span>'}</div>`;
   if(eq.tipo!=='manual'){
@@ -865,7 +873,8 @@ function renderLanc(){
     html+=`<div class="card" style="padding:10px;"><div class="tablewrap"><table class="dt" data-seg="${escapeHtml(g)}">${theadCampos(cols,[`<th>${escapeHtml(eq.rotuloLinha||'Linha')}</th>`,...(eq.usaRegional?['<th>Reg.</th>']:[])],c=>(isNum(c)?'r ':'')+(c.auto?'auto':''))}<tbody>`;
     ls.forEach(l=>{
       const soLeitura=!pode||!linhaEditavel(eq,l);
-      html+=`<tr><td class="nome">${escapeHtml(l.nome)}${porEmail(eq)&&!linhaEditavel(eq,l)?` <span class="pill pend" title="${l.email?'E-mail removido de Quem preenche — linha inativa':'Linha antiga sem e-mail — ligue a um e-mail em Equipes &amp; Campos para editar'}">${l.email?'inativo':'histórico'}</span>`:''}</td>${eq.usaRegional?`<td>${l.regional?`<span class="reg ${escapeHtml(l.regional)}">${escapeHtml(l.regional)}</span>`:''}</td>`:''}`;
+      const outro=porEmail(eq)&&!isAdmin()&&l.email&&l.ativo!==false&&!minhaLinha(eq,l);
+      html+=`<tr${minhaLinha(eq,l)?' class="minha"':''}><td class="nome">${escapeHtml(l.nome)}${minhaLinha(eq,l)?' <span class="pill ok">você</span>':''}${porEmail(eq)&&!linhaEditavel(eq,l)&&!outro?` <span class="pill pend" title="${l.email?'E-mail removido de Quem preenche — linha inativa':'Linha antiga sem e-mail — ligue a um e-mail em Equipes &amp; Campos para editar'}">${l.email?'inativo':'histórico'}</span>`:''}</td>${eq.usaRegional?`<td>${l.regional?`<span class="reg ${escapeHtml(l.regional)}">${escapeHtml(l.regional)}</span>`:''}</td>`:''}`;
       cols.forEach(c=>{
         const v=valor(s,eq,l.id,g,c);
         if(c.auto){ const live=autoVal(eq,s,l.id,c.auto)!==undefined; html+=`<td class="auto ${live?'':'hist'}" title="${live?'do app':'histórico gravado'}">${fmt(c,v)}</td>`; return; }
@@ -886,7 +895,7 @@ function renderLanc(){
     html+=`<div class="card" style="padding:10px;"><div class="tablewrap"><table class="dt">${theadCampos(nums,['<th>TOTAL GERAL</th>'])}<tbody><tr class="total-row" id="lanc-total-geral"><td>Todas</td>${nums.map(c=>`<td class="num" data-tc="${c.id}">${fmt(c,totalSemana(eq,s,c))}</td>`).join('')}</tr></tbody></table></div></div>`;
   }
   if(pode&&porEmail(eq)){
-    html+=`<div class="note">As linhas desta equipe vêm dos e-mails cadastrados em <b>Equipes &amp; Campos › Quem preenche</b> (nome = parte antes do @). Para incluir ou retirar alguém, fale com o administrador.</div>`;
+    html+=`<div class="note">As linhas desta equipe vêm dos e-mails cadastrados em <b>Equipes &amp; Campos › Quem preenche</b> (nome = parte antes do @). Cada pessoa preenche só a própria linha (destacada no topo) e vê as demais.${isAdmin()?' Como administrador, você pode editar todas.':''} Para incluir ou retirar alguém, fale com o administrador.</div>`;
   } else if(pode&&eq.tipo==='manual'){
     html+=`<div class="card"><h3>Linhas da equipe · ${escapeHtml(eq.rotuloLinha||'Linha')} <span class="h3-side">inclua quem entrou na equipe ou retire quem saiu</span></h3>
       <div class="add-row"><input type="text" id="nova-linha" placeholder="Nome do(a) ${escapeHtml((eq.rotuloLinha||'linha').toLowerCase())}">${eq.usaRegional?`<input type="text" id="nova-linha-reg" placeholder="Regional (ex.: R1)" style="max-width:160px;min-width:120px;">`:''}<button class="btn ghost small" id="btn-add-linha" type="button">+ Adicionar</button></div>
