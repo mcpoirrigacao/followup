@@ -157,6 +157,8 @@ table.cfg tr.inativo td{opacity:.5;}
 .user-row span{flex:1;word-break:break-all;}
 .add-row{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;}
 .add-row input{flex:1;min-width:200px;border:1px solid var(--borda);border-radius:4px;padding:8px 10px;font-size:.86rem;background:#fffdf9;}
+.guia-acesso{margin-top:12px;background:#fbf8f2;border:1px solid var(--borda);border-left:4px solid var(--azul-claro);border-radius:6px;padding:12px 16px;font-size:.84rem;line-height:1.5;}
+.guia-acesso p{margin:8px 0 4px;} .guia-acesso ol,.guia-acesso ul{margin:2px 0 6px 18px;padding:0;} .guia-acesso li{margin:2px 0;}
 .sub-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.5px;color:var(--texto-suave);font-weight:700;margin:14px 0 6px;}
 body:not(.is-admin) .somente-admin{display:none !important;}
 .ms-btn{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:4px;font-size:.75rem;padding:6px 12px;cursor:pointer;font-weight:600;}
@@ -269,6 +271,47 @@ body:not(.is-admin) .somente-admin{display:none !important;}
         <button class="btn ghost small" id="btn-cp-editar" type="button">📋 Copiar quem EDITA a pasta FollowUP</button>
         <button class="btn ghost small" id="btn-cp-ler" type="button">📋 Copiar quem só LÊ a pasta FollowUP</button>
         <button class="btn ghost small" id="btn-cp-fontes" type="button">📋 Copiar quem LÊ as pastas dos outros apps</button>
+        <button class="btn ghost small" id="btn-guia-acesso" type="button">📘 Como alterar acessos no SharePoint (grupos)</button>
+      </div>
+      <div id="guia-acesso" class="guia-acesso" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+          <b style="color:var(--azul-escuro);font-size:.95rem;">Como liberar ou alterar acessos no SharePoint — modelo de grupos</b>
+          <button class="btn ghost small" id="btn-copiar-guia" type="button">📋 Copiar orientações</button>
+        </div>
+        <div id="guia-acesso-texto">
+        <p><b>Modelo usado:</b> dois grupos do site MCPOIRRIGACAO controlam o acesso. Ninguém recebe permissão individual na pasta.</p>
+        <table class="dt" style="margin:6px 0 12px;"><thead><tr><th>Grupo</th><th>Quem entra</th><th>Pasta FollowUP</th><th>Pastas Pecas Varejo, assistencia e TreinamentosMCPO</th></tr></thead><tbody>
+          <tr><td class="nome">FollowUP – Edição</td><td>Administradores e quem <b>preenche</b> alguma equipe (botão "Copiar quem EDITA")</td><td>Colaboração / Pode editar</td><td>Leitura</td></tr>
+          <tr><td class="nome">FollowUP – Leitura</td><td>Visualizadores gerais e quem só <b>visualiza</b> Peças, Assistência ou Treinamentos (botão "Copiar quem só LÊ")</td><td>Leitura / Pode exibir</td><td>Leitura</td></tr>
+        </tbody></table>
+        <p><b>1. Pessoa nova (entrou na equipe)</b></p>
+        <ol>
+          <li>Cadastre o e-mail no app: <b>Equipes &amp; Campos › Quem preenche</b> (ou <b>Quem visualiza</b>), ou em Parâmetros para admin/visualizador geral.</li>
+          <li>No SharePoint: engrenagem ⚙ › <b>Permissões do site</b> › <b>Configurações de permissões avançadas</b> › abra o grupo <b>FollowUP – Edição</b> (quem preenche) ou <b>FollowUP – Leitura</b> (quem só vê).</li>
+          <li><b>Novo › Adicionar Usuários</b>, cole o e-mail (ou a lista copiada pelos botões acima) e clique em <b>Compartilhar</b>, sem enviar convite.</li>
+        </ol>
+        <p><b>2. Pessoa saiu</b></p>
+        <ol>
+          <li>No app, remova o e-mail (a linha dela fica inativa e o histórico é mantido).</li>
+          <li>No SharePoint, abra o grupo, marque a pessoa e use <b>Ações › Remover Usuários do Grupo</b>.</li>
+        </ol>
+        <p><b>3. Pessoa mudou de papel</b> (passou a preencher, ou deixou de preencher e só visualiza): tire de um grupo e coloque no outro. Ninguém deve ficar nos dois.</p>
+        <p><b>4. Conferir</b>: na pasta FollowUP, <b>⋯ › Gerenciar acesso › Avançado › Verificar Permissões</b>, digite o e-mail. Quem preenche deve aparecer com <b>Colaboração/Editar</b>; quem visualiza, com <b>Leitura</b>.</p>
+        <p><b>5. Montagem inicial (só uma vez)</b></p>
+        <ol>
+          <li>Crie os grupos <b>FollowUP – Edição</b> e <b>FollowUP – Leitura</b> em Configurações de permissões avançadas › <b>Criar Grupo</b> (permissão no site: Leitura).</li>
+          <li>Pasta FollowUP › Gerenciar acesso › Avançado › <b>Parar de Herdar Permissões</b> (se ainda herda) › <b>Conceder Permissões</b>: Edição = Colaboração; Leitura = Leitura.</li>
+          <li>Nas pastas <b>Pecas Varejo</b>, <b>assistencia</b> e <b>TreinamentosMCPO</b>: conceda <b>Leitura</b> aos dois grupos (não remova ninguém dessas pastas).</li>
+          <li>Só depois de conferir com Verificar Permissões, retire da pasta FollowUP o grupo <b>Membros</b>, <b>Visitantes</b>, <b>leitura geral</b> e as pessoas avulsas. Mantenha sempre <b>Proprietários</b>.</li>
+        </ol>
+        <p><b>Cuidados</b></p>
+        <ul>
+          <li>Sempre <b>adicione no grupo antes</b> de remover acessos antigos. Quem fica sem acesso vê "Sem acesso à pasta" no app e não consegue lançar.</li>
+          <li>Não mexa nas permissões enquanto as equipes estiverem lançando; prefira fora do horário de preenchimento.</li>
+          <li>Depois de mudar permissões, peça para a pessoa fechar e abrir o app (F5).</li>
+          <li>Para desfazer a quebra de herança: na página de permissões da pasta, <b>Excluir permissões exclusivas</b>.</li>
+        </ul>
+        </div>
       </div>
       <div id="emails-resumo" class="note" style="display:none;"></div>
     </div>
@@ -1498,6 +1541,9 @@ document.getElementById('btn-cp-ler').onclick=()=>{
   const tambem=L.filter(x=>x.editar&&(x.perfis.has('Visualizador geral')||x.perfis.has('Visualiza equipe')));
   if(tambem.length) document.getElementById('emails-resumo').insertAdjacentHTML('beforeend',`<br><br><b>Não entram nesta lista</b> porque também preenchem alguma equipe e já estão em <b>"Copiar quem EDITA"</b> (editar inclui ler): ${tambem.map(x=>escapeHtml(x.email)+' <span style="color:var(--texto-suave)">('+escapeHtml(Array.from(x.equipes).filter(e=>/preenche/.test(e)).join(', ')||'admin')+')</span>').join('; ')}`);
 };
+document.getElementById('btn-guia-acesso').onclick=()=>{const g=document.getElementById('guia-acesso');const abre=g.style.display==='none';g.style.display=abre?'block':'none';if(abre)g.scrollIntoView({behavior:'smooth',block:'start'});};
+document.getElementById('btn-copiar-guia').onclick=()=>{const txt=document.getElementById('guia-acesso-texto').innerText.replace(/\n{3,}/g,'\n\n');
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(()=>toast('Orientações copiadas.'),()=>toast('Não foi possível copiar.')); else toast('Selecione o texto e copie manualmente.');};
 document.getElementById('btn-cp-fontes').onclick=()=>copiarEmails(mapaAcessos().filter(x=>x.leitura.size).map(x=>x.email),'Pode exibir · pastas '+[state.config.fontes.pecas.pasta,state.config.fontes.assist.pasta,(state.config.fontes.trein||{}).pasta].filter(Boolean).join(', '));
 document.getElementById('btn-add-admin').addEventListener('click',async()=>{const em=limparEmail(document.getElementById('inp-novo-admin').value);if(!em)return;if(!low(acesso.emailsAutorizados).includes(em))acesso.emailsAutorizados.push(em);acesso.emailsComuns=acesso.emailsComuns.filter(x=>x.toLowerCase()!==em);document.getElementById('inp-novo-admin').value='';await saveAcesso();renderUsuarios();applyAccess();toast('Admin adicionado.');});
 document.getElementById('btn-add-comum').addEventListener('click',async()=>{const em=limparEmail(document.getElementById('inp-novo-comum').value);if(!em)return;if(low(acesso.emailsAutorizados).includes(em)){toast('Já é admin.');return;}if(!low(acesso.emailsComuns).includes(em))acesso.emailsComuns.push(em);document.getElementById('inp-novo-comum').value='';await saveAcesso();renderUsuarios();toast('Visualizador adicionado.');});
