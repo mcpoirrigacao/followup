@@ -1493,7 +1493,11 @@ document.getElementById('btn-exp-emails').onclick=()=>{
   box.innerHTML=`Exportados <b>${L.length}</b> e-mails: <b>${L.filter(x=>x.editar).length}</b> precisam <b>editar</b> a pasta FollowUP e <b>${L.filter(x=>!x.editar).length}</b> só <b>ler</b>.`;
 };
 document.getElementById('btn-cp-editar').onclick=()=>copiarEmails(mapaAcessos().filter(x=>x.editar).map(x=>x.email),'Pode editar · pasta FollowUP');
-document.getElementById('btn-cp-ler').onclick=()=>copiarEmails(mapaAcessos().filter(x=>!x.editar).map(x=>x.email),'Pode exibir · pasta FollowUP');
+document.getElementById('btn-cp-ler').onclick=()=>{
+  const L=mapaAcessos(); copiarEmails(L.filter(x=>!x.editar).map(x=>x.email),'Pode exibir · pasta FollowUP');
+  const tambem=L.filter(x=>x.editar&&(x.perfis.has('Visualizador geral')||x.perfis.has('Visualiza equipe')));
+  if(tambem.length) document.getElementById('emails-resumo').insertAdjacentHTML('beforeend',`<br><br><b>Não entram nesta lista</b> porque também preenchem alguma equipe e já estão em <b>"Copiar quem EDITA"</b> (editar inclui ler): ${tambem.map(x=>escapeHtml(x.email)+' <span style="color:var(--texto-suave)">('+escapeHtml(Array.from(x.equipes).filter(e=>/preenche/.test(e)).join(', ')||'admin')+')</span>').join('; ')}`);
+};
 document.getElementById('btn-cp-fontes').onclick=()=>copiarEmails(mapaAcessos().filter(x=>x.leitura.size).map(x=>x.email),'Pode exibir · pastas '+[state.config.fontes.pecas.pasta,state.config.fontes.assist.pasta,(state.config.fontes.trein||{}).pasta].filter(Boolean).join(', '));
 document.getElementById('btn-add-admin').addEventListener('click',async()=>{const em=limparEmail(document.getElementById('inp-novo-admin').value);if(!em)return;if(!low(acesso.emailsAutorizados).includes(em))acesso.emailsAutorizados.push(em);acesso.emailsComuns=acesso.emailsComuns.filter(x=>x.toLowerCase()!==em);document.getElementById('inp-novo-admin').value='';await saveAcesso();renderUsuarios();applyAccess();toast('Admin adicionado.');});
 document.getElementById('btn-add-comum').addEventListener('click',async()=>{const em=limparEmail(document.getElementById('inp-novo-comum').value);if(!em)return;if(low(acesso.emailsAutorizados).includes(em)){toast('Já é admin.');return;}if(!low(acesso.emailsComuns).includes(em))acesso.emailsComuns.push(em);document.getElementById('inp-novo-comum').value='';await saveAcesso();renderUsuarios();toast('Visualizador adicionado.');});
