@@ -324,7 +324,7 @@ body:not(.is-admin) .somente-admin{display:none !important;}
        excel:{aba, colLinha, colSeg, colRegional} }
    state.registros["semana|equipe|linha|segmento"] = { s,e,l,g, v:{campoId:valor}, u:email, t:ISO }
    ========================================================================= */
-const TIPOS={inteiro:'Inteiro',decimal:'Decimal',moeda:'Moeda (R$)',horas:'Horas',texto:'Texto',lista:'Lista'};
+const TIPOS={inteiro:'Inteiro',decimal:'Decimal',moeda:'Moeda (R$)',percentual:'Porcentagem (%)',horas:'Horas',texto:'Texto',lista:'Lista'};
 const AGREG={soma:'Soma',media:'Média',maximo:'Máximo'};
 function C(nome,tipo,extra){ return Object.assign({id:'c_'+slug(nome),nome,tipo:tipo||'inteiro',opcoes:[],agreg:'soma',meta:0,destaque:false,ativo:true,auto:'',aliases:[]},extra||{}); }
 function A(id,nome,tipo,extra){ return Object.assign(C(nome,tipo,extra),{id,auto:id}); }
@@ -360,8 +360,8 @@ function defaultEquipes(){
         C('IRRICONTROL'),C('VALOR IRRICONTROL','moeda',{destaque:true}),C('CACAU'),C('VALOR CACAU','moeda'),C('GRÃOS'),C('VALOR GRÃOS','moeda',{aliases:['VALLOR GRÃOS']}),
         C('AÇAÍ'),C('VALOR AÇAÍ','moeda'),C('CITRUS'),C('VALOR CITRUS','moeda'),C('CANA'),C('VALOR CANA','moeda'),C('CAFÉ'),C('VALOR CAFÉ','moeda'),
         C('PASTAGEM'),C('VALOR PASTAGEM','moeda'),C('JARDIM'),C('GOTEJO',0,{aliases:['GOTOJE']}),C('VALOR GOTEJO','moeda')]}),
-    E('ofp','OFP · ADM Vendas',{rotuloLinha:'Regional',excel:{aba:'OFP',colLinha:'REGIONAL',colSeg:'',colRegional:''},
-      campos:[C('FINANCIAMENTO','moeda',{destaque:true}),C('QTD PROJETOS INTERNALIZADOS',0,{destaque:true}),C('COMISSÃO','moeda',{destaque:true}),C('VALOR MONTAGEM','moeda',{destaque:true})]}),
+    E('ofp','OFP · ADM Vendas',{migrP:'p1',rotuloLinha:'Regional',excel:{aba:'OFP',colLinha:'REGIONAL',colSeg:'',colRegional:''},
+      campos:[C('FINANCIAMENTO','moeda',{destaque:true}),C('QTD PROJETOS INTERNALIZADOS',0,{destaque:true}),C('COMISSÃO','percentual',{destaque:true,agreg:'media'}),C('VALOR MONTAGEM','moeda',{destaque:true})]}),
     E('pecas','Peças',{tipo:'pecas',rotuloLinha:'Loja',excel:{aba:'PEÇAS',colLinha:'REGIONAL',colSeg:'',colRegional:''},
       campos:[A('p_ct','CLIENTES CONTATADOS','inteiro',{destaque:true}),A('p_or','ORÇAMENTO ABERTO','moeda',{destaque:true}),A('p_vq','VENDA QUENTE','moeda'),
         A('p_pd','ORÇAMENTO PERDIDO','moeda'),A('p_ft','ORÇAMENTO FATURADO','moeda',{destaque:true,aliases:['FATURADO']}),C('KM RODADO')]}),
@@ -412,6 +412,12 @@ function withDefaults(s){
       eq.campos.forEach(c=>{ if(!c.grupo){ const k=Object.keys(G).find(k=>norm(k)===norm(c.nome)); if(k) c.grupo=G[k]; } });
       ordenarGrupos(eq); eq.migrGrp='g1'; _migrados.push(eq.id);
     }
+    if(eq.id==='ofp'&&eq.migrP!=='p1'){ // COMISSÃO em porcentagem (planilha guarda 0,1213 = 12,13%)
+      const c=eq.campos.find(x=>norm(x.nome)==='COMISSAO');
+      if(c&&c.tipo!=='percentual'){ c.tipo='percentual'; c.agreg='media';
+        Object.keys(s.registros).forEach(k=>{ const r=s.registros[k]; if(r.e===eq.id&&r.v&&typeof r.v[c.id]==='number'&&Math.abs(r.v[c.id])<=1){ r.v[c.id]=Math.round(r.v[c.id]*1e6)/1e4; _migRegs.push(k); } }); }
+      eq.migrP='p1'; _migrados.push(eq.id);
+    }
     if(eq.id==='assistencia'&&eq.migrA!=='a2'){ eq.campos=camposAssist(eq.campos); eq.migrA='a2'; _migrados.push(eq.id); }
     eq.campos.forEach(c=>{ c.opcoes=c.opcoes||[]; c.aliases=c.aliases||[]; if(!c.agreg) c.agreg='soma'; if(c.ativo===undefined) c.ativo=true; });
   });
@@ -424,7 +430,7 @@ function save(){stateGen++;try{localStorage.setItem(STORE_KEY,JSON.stringify(sta
 
 /* ============================ HELPERS ============================ */
 function n(v){const x=Number(v);return isFinite(x)?x:0;}
-function isNum(c){return ['inteiro','decimal','moeda','horas'].includes(c.tipo);}
+function isNum(c){return ['inteiro','decimal','moeda','percentual','horas'].includes(c.tipo);}
 function brl0(v){return (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL',minimumFractionDigits:0,maximumFractionDigits:0});}
 function int(v){return Math.round(v||0).toLocaleString('pt-BR');}
 function dec(v,d){return (v||0).toLocaleString('pt-BR',{minimumFractionDigits:d==null?1:d,maximumFractionDigits:d==null?1:d});}
@@ -437,6 +443,7 @@ function fmt(c,v){
     case 'inteiro': return int(n(v));
     case 'decimal': return dec(n(v),Number.isInteger(n(v))?0:1);
     case 'horas': return dec(n(v),Number.isInteger(n(v))?0:1)+' h';
+    case 'percentual': return dec(n(v),Number.isInteger(n(v))?0:2)+'%';
     default: return escapeHtml(String(v));
   }
 }
@@ -954,7 +961,7 @@ function renderLanc(){
         if(soLeitura){ html+=`<td class="${isNum(c)?'num':''}">${fmt(c,v)}</td>`; return; }
         if(c.tipo==='lista') html+=`<td><select ${da}><option value=""></option>${c.opcoes.map(o=>`<option ${String(val)===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select></td>`;
         else if(c.tipo==='texto') html+=`<td><input type="text" ${da} value="${escapeHtml(val)}"></td>`;
-        else html+=`<td><input type="number" step="any" inputmode="decimal" ${da} value="${escapeHtml(val)}"></td>`;
+        else html+=`<td><input type="number" step="any" inputmode="decimal" ${da} value="${escapeHtml(val)}"${c.tipo==='percentual'?' placeholder="%" title="Digite em %, ex.: 12,5"':''}></td>`;
       });
       html+=`</tr>`;
     });
@@ -1254,7 +1261,7 @@ function analisarPlanilha(wb,criarCampos){
       const s=segunda(d), g=iS>=0&&eq.segmentos.length?String(row[iS]||'').trim().toUpperCase():'';
       if(eq.segmentos.length&&!eq.segmentos.includes(g)) continue;
       const k=rkey(s,eq.id,lid,g); const reg=res.registros[k]||(res.registros[k]={s,e:eq.id,l:lid,g,v:{},u:'importação planilha',t:new Date().toISOString()});
-      vals.forEach(({i,c})=>{ let v=row[i]; if(isNum(c)||c.tipo==='inteiro'){ v=typeof v==='number'?v:Number(String(v).replace(/\./g,'').replace(',','.')); if(!isFinite(v)) return; }
+      vals.forEach(({i,c})=>{ let v=row[i]; if(isNum(c)||c.tipo==='inteiro'){ v=typeof v==='number'?v:Number(String(v).replace('%','').replace(/\./g,'').replace(',','.')); if(!isFinite(v)) return; if(c.tipo==='percentual'&&typeof row[i]==='number'&&Math.abs(v)<=1) v=Math.round(v*1e6)/1e4; }
         else v=String(v).trim();
         if(isNum(c)&&temValor(reg.v[c.id])) reg.v[c.id]=c.agreg==='soma'?n(reg.v[c.id])+v:Math.max(n(reg.v[c.id]),v); else reg.v[c.id]=v; });
       n_++; semanas.add(s);
