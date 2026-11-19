@@ -448,6 +448,7 @@ function nomeDoEmail(em){return String(em||'').split('@')[0].trim().toLowerCase(
 function chaveEmail(em){return norm(nomeDoEmail(em).replace(/[._\-]+/g,' '));}
 /* linha antiga (ex.: "ALANA", "DIEGO SANTOS") que corresponde ao e-mail — só quando é única */
 function casaNomeEmail(nome,em){const a=chaveEmail(em),b=norm(nome);return !!b&&(a===b||a.startsWith(b+' '));}
+function linhaEditavel(eq,l){ if(!porEmail(eq)) return true; return !!l.email&&l.ativo!==false&&low(eq.membros).includes(l.email.toLowerCase()); }
 function linhaDoMembro(eq,em){em=String(em).toLowerCase();return eq.linhas.find(l=>(l.email||'').toLowerCase()===em);}
 function vincularMembro(eq,em,reg){
   em=String(em).toLowerCase(); if(!porEmail(eq)) return null;
@@ -462,6 +463,7 @@ function sincronizarMembros(){
   let mudou=false;
   state.config.equipes.forEach(eq=>{ if(!porEmail(eq)) return; let m=false;
     eq.membros.forEach(em=>{ const l=linhaDoMembro(eq,em); if(!l||l.nome!==nomeDoEmail(em)){ vincularMembro(eq,em); m=true; } });
+    const ms=low(eq.membros); eq.linhas.forEach(l=>{ if(l.email&&!ms.includes(l.email.toLowerCase())&&l.ativo!==false){ l.ativo=false; m=true; } });
     if(m){ dirtyConfig.add('eq:'+eq.id); mudou=true; } });
   if(mudou) save();
 }
@@ -785,8 +787,8 @@ function renderLanc(){
     if(g) html+=`<div class="seg-title"><i style="background:${SEG_CORES[gi%5]}"></i>${escapeHtml(g)}</div>`;
     html+=`<div class="card" style="padding:10px;"><div class="tablewrap"><table class="dt" data-seg="${escapeHtml(g)}"><thead><tr><th>${escapeHtml(eq.rotuloLinha||'Linha')}</th>${eq.usaRegional?'<th>Reg.</th>':''}${cols.map(c=>`<th class="${isNum(c)?'r':''} ${c.auto?'auto':''}" title="${c.auto?'automático':''}">${escapeHtml(c.nome)}</th>`).join('')}</tr></thead><tbody>`;
     ls.forEach(l=>{
-      const soLeitura=!pode||(porEmail(eq)&&!l.email);
-      html+=`<tr><td class="nome">${escapeHtml(l.nome)}${porEmail(eq)&&!l.email?' <span class="pill pend" title="Linha antiga sem e-mail — ligue a um e-mail em Equipes &amp; Campos para editar">histórico</span>':''}</td>${eq.usaRegional?`<td>${l.regional?`<span class="reg ${escapeHtml(l.regional)}">${escapeHtml(l.regional)}</span>`:''}</td>`:''}`;
+      const soLeitura=!pode||!linhaEditavel(eq,l);
+      html+=`<tr><td class="nome">${escapeHtml(l.nome)}${porEmail(eq)&&!linhaEditavel(eq,l)?` <span class="pill pend" title="${l.email?'E-mail removido de Quem preenche — linha inativa':'Linha antiga sem e-mail — ligue a um e-mail em Equipes &amp; Campos para editar'}">${l.email?'inativo':'histórico'}</span>`:''}</td>${eq.usaRegional?`<td>${l.regional?`<span class="reg ${escapeHtml(l.regional)}">${escapeHtml(l.regional)}</span>`:''}</td>`:''}`;
       cols.forEach(c=>{
         const v=valor(s,eq,l.id,g,c);
         if(c.auto){ const live=autoVal(eq,s,l.id,c.auto)!==undefined; html+=`<td class="auto ${live?'':'hist'}" title="${live?'do app':'histórico gravado'}">${fmt(c,v)}</td>`; return; }
@@ -897,7 +899,7 @@ function renderCampos(){
   h+=`<div class="card"><h3>Linhas · ${escapeHtml(eq.rotuloLinha||'Linha')} <span class="h3-side">${eq.tipo!=='manual'?'as lojas/bases do app entram sozinhas; aqui dá para incluir outras ou esconder':pe?'criadas a partir dos e-mails de quem preenche':'cada linha é uma linha da tabela de lançamento'}</span></h3>
     ${pe?`<div class="note">O nome de cada linha vem do e-mail cadastrado em <b>Quem preenche</b> (ex.: alana.xavier@mcpoirrigacao.com.br → <b>alana.xavier</b>). Linhas antigas da planilha (sem e-mail) ficam só como histórico; use a coluna <b>E-mail</b> para ligar uma delas a quem preenche e manter o histórico na mesma linha.</div>`:''}
     <div class="tablewrap" style="max-height:420px;"><table class="dt cfg"><thead><tr><th>Nome</th>${pe?'<th>E-mail</th>':''}${eq.usaRegional?'<th>Regional</th>':''}<th>Ativa</th><th></th></tr></thead><tbody>
-    ${ordLinhas.map(l=>`<tr class="${l.ativo===false?'inativo':''}"><td>${pe&&l.email?`<b>${escapeHtml(l.nome)}</b>`:`<input type="text" data-lnome="${l.id}" value="${escapeHtml(l.nome)}">`}</td>${pe?`<td>${l.email?`<span style="font-size:.76rem;">${escapeHtml(l.email)}</span>`:(eq.membros.length?`<select data-lvinc="${l.id}"><option value="">— histórico (sem e-mail) —</option>${eq.membros.map(em=>`<option value="${escapeHtml(em)}">${escapeHtml(em)}</option>`).join('')}</select>`:'<span style="font-size:.72rem;color:var(--texto-suave);">histórico</span>')}</td>`:''}${eq.usaRegional?`<td><input type="text" data-lreg="${l.id}" value="${escapeHtml(l.regional||'')}" style="max-width:110px;"></td>`:''}<td style="text-align:center;"><input type="checkbox" data-lativo="${l.id}" ${l.ativo!==false?'checked':''}></td><td><button class="btn icon danger" data-lrem="${l.id}" type="button">🗑</button></td></tr>`).join('')}
+    ${ordLinhas.map(l=>`<tr class="${l.ativo===false?'inativo':''}"><td>${pe&&l.email?`<b>${escapeHtml(l.nome)}</b>`:`<input type="text" data-lnome="${l.id}" value="${escapeHtml(l.nome)}">`}</td>${pe?`<td>${l.email?`<span style="font-size:.76rem;">${escapeHtml(l.email)}</span>${l.ativo===false?' <span class="pill pend">removido</span>':''}`:(eq.membros.length?`<select data-lvinc="${l.id}"><option value="">— histórico (sem e-mail) —</option>${eq.membros.map(em=>`<option value="${escapeHtml(em)}">${escapeHtml(em)}</option>`).join('')}</select>`:'<span style="font-size:.72rem;color:var(--texto-suave);">histórico</span>')}</td>`:''}${eq.usaRegional?`<td><input type="text" data-lreg="${l.id}" value="${escapeHtml(l.regional||'')}" style="max-width:110px;"></td>`:''}<td style="text-align:center;"><input type="checkbox" data-lativo="${l.id}" ${l.ativo!==false?'checked':''} ${pe&&l.email?'disabled title="Segue o cadastro em Quem preenche: remova o e-mail para inativar, cadastre de novo para reativar"':''}></td><td><button class="btn icon danger" data-lrem="${l.id}" type="button">🗑</button></td></tr>`).join('')}
     ${fl.filter(x=>!eq.linhas.find(l=>l.id===x.id)).map(x=>`<tr><td>${escapeHtml(x.nome)} <span class="pill auto">do app</span></td>${eq.usaRegional?'<td></td>':''}<td style="text-align:center;"><input type="checkbox" checked data-lapp="${x.id}" data-lappnome="${escapeHtml(x.nome)}"></td><td></td></tr>`).join('')}
     </tbody></table></div>
     ${pe?'':`<div class="add-row"><input type="text" id="cfg-nova-linha" placeholder="Nome">${eq.usaRegional?'<input type="text" id="cfg-nova-linha-reg" placeholder="Regional" style="max-width:140px;min-width:100px;">':''}<button class="btn ghost small" id="cfg-add-linha" type="button">+ Adicionar</button></div>`}</div>`;
@@ -957,6 +959,10 @@ function renderCampos(){
   body.querySelectorAll('[data-lapp]').forEach(el=>el.addEventListener('change',()=>{ if(!el.checked){ eq.linhas.push({id:el.dataset.lapp,nome:el.dataset.lappnome,regional:'',ativo:false}); mark(); renderCampos(); }}));
   body.querySelectorAll('[data-lrem]').forEach(b=>b.onclick=()=>{
     const l=eq.linhas.find(x=>x.id===b.dataset.lrem);
+    if(pe&&l.email&&low(eq.membros).includes(l.email.toLowerCase())){
+      if(!confirm(`Remover ${l.email} de Quem preenche? A linha "${l.nome}" fica inativa (o histórico continua guardado).`)) return;
+      eq.membros=eq.membros.filter(x=>x.toLowerCase()!==l.email.toLowerCase()); l.ativo=false; mark(); renderCampos(); return;
+    }
     const usado=Object.values(state.registros).some(r=>r.e===eq.id&&r.l===l.id);
     if(usado){ if(!confirm(`"${l.nome}" tem histórico. Ela será desativada (o histórico continua). Continuar?`)) return; l.ativo=false; }
     else { if(!confirm(`Excluir "${l.nome}"?`)) return; eq.linhas=eq.linhas.filter(x=>x!==l); }
