@@ -688,15 +688,14 @@ function resumoAssistHtml(s){
   };
   const T=linha(null); const R=regs.map(rg=>({rg,...linha(rg)}));
   const mesNome=D(fim).toLocaleDateString('pt-BR',{month:'long'});
-  let h=`<div class="block-title">Resumo de faturamento</div><div class="totals-strip">`+
+  let h=`<div class="block-title">Resumo de faturamento</div><div class="totals-strip" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">`+
     tbox('Faturado na semana',brl0(T.fatSem),`${int(T.fatQtd)} OS · sem. anterior ${brl0(T.fatAnt)} ${deltaHtml(T.fatSem,T.fatAnt)}`,{accent:true})+
     tbox('Faturado em '+mesNome,brl0(T.fatMes),`de ${ddmm(mesIni)} até ${ddmm(fim)}`)+
-    (pv?tbox('Meta do período',T.meta?pct(T.real/T.meta):'—',`${brl0(T.real)} de ${brl0(T.meta)} · ${ddmm(cfg.periodoInicio)} a ${ddmm(cfg.periodoFim)}`,{bar:T.meta?T.real/T.meta:null}):tbox('Meta do período','—','período da meta não configurado no app'))+
     tbox('Pendente de faturar',brl0(T.pend),`${int(T.andamento)} OS em andamento (situação atual)`)+`</div>`;
-  h+=`<div class="card"><h3>Por regional <span class="h3-side">semana ${ddmm(s)} a ${ddmm(fim)}</span></h3><div class="tablewrap"><table class="dt"><thead><tr><th>Regional</th><th class="r">OS abertas</th><th class="r">Em andamento*</th><th class="r">OS faturadas</th><th class="r">Faturado semana</th><th class="r">Faturado no mês</th><th class="r">Pendente de faturar*</th>${pv?'<th class="r">Realizado período</th><th class="r">Meta período</th><th>% meta</th>':''}</tr></thead><tbody>`+
-    R.map(x=>`<tr><td class="nome">${escapeHtml(x.rg)}</td><td class="num">${int(x.abertas)}</td><td class="num">${int(x.andamento)}</td><td class="num">${int(x.fatQtd)}</td><td class="num">${brl0(x.fatSem)}</td><td class="num">${brl0(x.fatMes)}</td><td class="num">${brl0(x.pend)}</td>${pv?`<td class="num">${brl0(x.real)}</td><td class="num">${brl0(x.meta)}</td><td style="min-width:120px;"><div style="display:flex;align-items:center;gap:6px;"><div class="bar light" style="flex:1;margin:0;"><span style="width:${x.meta?Math.min(100,x.real/x.meta*100):0}%"></span></div><b style="font-size:.74rem;">${x.meta?pct(x.real/x.meta):'—'}</b></div></td>`:''}</tr>`).join('')+
-    `<tr class="total-row"><td>TOTAL</td><td class="num">${int(T.abertas)}</td><td class="num">${int(T.andamento)}</td><td class="num">${int(T.fatQtd)}</td><td class="num">${brl0(T.fatSem)}</td><td class="num">${brl0(T.fatMes)}</td><td class="num">${brl0(T.pend)}</td>${pv?`<td class="num">${brl0(T.real)}</td><td class="num">${brl0(T.meta)}</td><td><b>${T.meta?pct(T.real/T.meta):'—'}</b></td>`:''}</tr></tbody></table></div>
-    <div class="note">* Situação atual do app (não depende da semana). Faturado = OS com NFS-e e data de faturamento, como no app de Assistência; meta e período vêm dos Parâmetros do app.${pv?' Realizado do período vai do início do período até o fim da semana selecionada.':''}</div></div>`;
+  h+=`<div class="card"><h3>Por regional <span class="h3-side">semana ${ddmm(s)} a ${ddmm(fim)}</span></h3><div class="tablewrap"><table class="dt"><thead><tr><th>Regional</th><th class="r">OS abertas</th><th class="r">Em andamento*</th><th class="r">OS faturadas</th><th class="r">Faturado semana</th><th class="r">Faturado no mês</th><th class="r">Pendente de faturar*</th></tr></thead><tbody>`+
+    R.map(x=>`<tr><td class="nome">${escapeHtml(x.rg)}</td><td class="num">${int(x.abertas)}</td><td class="num">${int(x.andamento)}</td><td class="num">${int(x.fatQtd)}</td><td class="num">${brl0(x.fatSem)}</td><td class="num">${brl0(x.fatMes)}</td><td class="num">${brl0(x.pend)}</td></tr>`).join('')+
+    `<tr class="total-row"><td>TOTAL</td><td class="num">${int(T.abertas)}</td><td class="num">${int(T.andamento)}</td><td class="num">${int(T.fatQtd)}</td><td class="num">${brl0(T.fatSem)}</td><td class="num">${brl0(T.fatMes)}</td><td class="num">${brl0(T.pend)}</td></tr></tbody></table></div>
+    <div class="note">* Situação atual do app (não depende da semana). Faturado = OS com NFS-e e data de faturamento, como no app de Assistência.</div></div>`;
   return h;
 }
 function autoVal(eq,s,lId,key){
