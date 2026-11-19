@@ -340,6 +340,17 @@ function camposTreinamentos(atuais){
   return out;
 }
 const _migrados=[], _migRegs=[];
+/* Assistência: pausadas, em andamento, fechadas e faturadas, fechadas pendentes de faturamento (todas do app) */
+function camposAssist(atuais){
+  const por=id=>atuais.find(c=>c.id===id||c.auto===id);
+  const mk=(id,nome,tipo,extra)=>{ const ex=por(id); if(ex){ Object.assign(ex,{nome,tipo,auto:id,ativo:true,removido:false},extra||{}); return ex; } return A(id,nome,tipo,extra); };
+  const out=[mk('a_pausadas','OS PAUSADAS','inteiro',{destaque:true}),mk('a_emaberto','OS EM ANDAMENTO','inteiro',{destaque:true}),
+    mk('a_fatqtd','OS FECHADAS E FATURADAS','inteiro',{aliases:['OS FECHADA']}),mk('a_fatvalor','OS FATURADO','moeda',{destaque:true}),
+    mk('a_pendqtd','OS FECHADAS PENDENTE FATURAMENTO','inteiro'),mk('a_pend','PENDENTE DE FATURAR','moeda',{destaque:true}),
+    mk('a_maisantiga','OS MAIS ANTIGA (DIAS)','inteiro',{agreg:'maximo',aliases:['OS MAIS ANTIGA']}),mk('a_media','MÉDIA DIAS EM ABERTO','decimal',{agreg:'media',aliases:['OS - MEDIA ABERTA']})];
+  atuais.forEach(c=>{ if(out.includes(c)) return; c.ativo=false; c.removido=true; out.push(c); }); // OS ABERTAS, MANUTENÇÃO, META FAT: escondidos (histórico mantido)
+  return out;
+}
 function defaultEquipes(){
   return [
     E('pivo','Pivô (Comercial)',{rotuloLinha:'Vendedor',usaRegional:true,segmentos:['FRIO','MORNO','QUENTE'],
@@ -355,9 +366,7 @@ function defaultEquipes(){
       campos:[A('p_ct','CLIENTES CONTATADOS','inteiro',{destaque:true}),A('p_or','ORÇAMENTO ABERTO','moeda',{destaque:true}),A('p_vq','VENDA QUENTE','moeda'),
         A('p_pd','ORÇAMENTO PERDIDO','moeda'),A('p_ft','ORÇAMENTO FATURADO','moeda',{destaque:true,aliases:['FATURADO']}),C('KM RODADO')]}),
     E('assistencia','Assistência Técnica',{tipo:'assistencia',rotuloLinha:'Loja / Base',excel:{aba:'ASSISTENCIA',colLinha:'REGIONAL',colSeg:'',colRegional:''},
-      campos:[A('a_abertas','OS ABERTAS','inteiro',{destaque:true}),A('a_emaberto','OS EM ANDAMENTO','inteiro',{destaque:true}),A('a_fatqtd','OS FECHADAS / FATURADAS','inteiro',{aliases:['OS FECHADA']}),
-        A('a_fatvalor','OS FATURADO','moeda',{destaque:true}),A('a_pend','PENDENTE DE FATURAR','moeda'),A('a_maisantiga','OS MAIS ANTIGA (DIAS)','inteiro',{agreg:'maximo',aliases:['OS MAIS ANTIGA']}),
-        A('a_media','MÉDIA DIAS EM ABERTO','decimal',{agreg:'media',aliases:['OS - MEDIA ABERTA']}),C('META FAT','moeda',{ativo:false}),C('MANUTENÇÃO',0,{aliases:['MANUTENCAO']}),C('MANUTENÇÃO FECHADA',0,{aliases:['MANURENCAO FECHADA']})]}),
+      migrA:'a2', campos:camposAssist([])}),
     E('projetos','Projetos',{rotuloLinha:'Projetista',excel:{aba:'PROJETOS',colLinha:'Coluna1',colSeg:'',colRegional:''},
       campos:[C('PROJETOS ENTREGUES',0,{destaque:true,aliases:['PROJETOS ENTRREGUES']}),C('UN','lista',{opcoes:['lance','hectare']}),C('LANCES',0,{destaque:true}),C('REVISADO'),C('PROJETO EXECUTIVO JHAER')]}),
     E('sapi','Treinamentos',{tipo:'treinamentos',rotuloLinha:'Total',linhasPorEmail:false,migr:'trein2',excel:{aba:'SAPI',colLinha:'REGIONAL',colSeg:'',colRegional:''},
@@ -403,6 +412,7 @@ function withDefaults(s){
       eq.campos.forEach(c=>{ if(!c.grupo){ const k=Object.keys(G).find(k=>norm(k)===norm(c.nome)); if(k) c.grupo=G[k]; } });
       ordenarGrupos(eq); eq.migrGrp='g1'; _migrados.push(eq.id);
     }
+    if(eq.id==='assistencia'&&eq.migrA!=='a2'){ eq.campos=camposAssist(eq.campos); eq.migrA='a2'; _migrados.push(eq.id); }
     eq.campos.forEach(c=>{ c.opcoes=c.opcoes||[]; c.aliases=c.aliases||[]; if(!c.agreg) c.agreg='soma'; if(c.ativo===undefined) c.ativo=true; });
   });
   return s;
@@ -627,17 +637,17 @@ function indexarAssist(data){
     if(!ext.assistBases.some(x=>linhaId(fake,x)===lid)) ext.assistBases.push(base);
     const ab=(r.dataAbertura||'').trim(), fat=(r.dataFaturamento||'').trim();
     if(/^\d{4}-\d{2}-\d{2}$/.test(ab)) flow(segunda(ab),lid).a_abertas++;
-    const sn=(ext.assistSnap[lid]=ext.assistSnap[lid]||{a_emaberto:0,a_pend:0,a_maisantiga:0,_soma:0,a_media:0});
-    const aberta=!fech.includes(r.status);
-    if(aberta){ sn.a_emaberto++; if(/^\d{4}-\d{2}-\d{2}$/.test(ab)){ const dias=Math.max(0,Math.round((h0-D(ab))/86400000)); sn._soma+=dias; sn.a_maisantiga=Math.max(sn.a_maisantiga,dias); } }
+    const sn=(ext.assistSnap[lid]=ext.assistSnap[lid]||{a_pausadas:0,a_emaberto:0,a_pendqtd:0,a_pend:0,a_maisantiga:0,_soma:0,_n:0,a_media:0});
+    const aberta=!fech.includes(r.status); const pausada=/pausad/i.test(r.status||'');
+    if(aberta){ if(pausada) sn.a_pausadas++; else sn.a_emaberto++; sn._n++; if(/^\d{4}-\d{2}-\d{2}$/.test(ab)){ const dias=Math.max(0,Math.round((h0-D(ab))/86400000)); sn._soma+=dias; sn.a_maisantiga=Math.max(sn.a_maisantiga,dias); } }
     const fp=(r.formaPagamento||'').toUpperCase();
     const situ=(chave&&fp.includes(chave))?sit.naoAplica:((r.nfse||'').trim()&&fat)?sit.faturado:aberta?'Em Andamento':sit.pendente;
-    if(situ===sit.pendente) sn.a_pend+=n(r.valor);
+    if(situ===sit.pendente){ sn.a_pend+=n(r.valor); sn.a_pendqtd++; }
     const ehFat=situ===sit.faturado&&/^\d{4}-\d{2}-\d{2}$/.test(fat);
     if(ehFat){ const f=flow(segunda(fat),lid); f.a_fatqtd++; f.a_fatvalor+=n(r.valor); }
-    ext.assistOS.push({regiao:(r.regiao||'').trim()||'(sem regional)',ab:/^\d{4}-\d{2}-\d{2}$/.test(ab)?ab:'',fat:ehFat?fat:'',valor:n(r.valor),aberta,pend:situ===sit.pendente});
+    ext.assistOS.push({regiao:(r.regiao||'').trim()||'(sem regional)',ab:/^\d{4}-\d{2}-\d{2}$/.test(ab)?ab:'',fat:ehFat?fat:'',valor:n(r.valor),aberta,pausada:aberta&&pausada,pend:situ===sit.pendente});
   });
-  Object.values(ext.assistSnap).forEach(sn=>{ sn.a_media=sn.a_emaberto?Math.round(sn._soma/sn.a_emaberto*10)/10:0; });
+  Object.values(ext.assistSnap).forEach(sn=>{ sn.a_media=sn._n?Math.round(sn._soma/sn._n*10)/10:0; });
 }
 const FONTE={pecas:{nome:'Peças Varejo',curto:'Peças',k:'pecas'},assistencia:{nome:'Assistência Técnica',curto:'Assistência',k:'assist'},treinamentos:{nome:'Treinamentos MCPO',curto:'Treinamentos',k:'trein'}};
 function fonteDe(eq){return FONTE[eq.tipo]||{nome:'',curto:'',k:''};}
@@ -658,7 +668,7 @@ function indexarTrein(data){
   });
   ext.treinLinhas=['MCPO'];
 }
-const SNAP=['a_emaberto','a_pend','a_maisantiga','a_media'];
+const SNAP=['a_pausadas','a_emaberto','a_pendqtd','a_pend','a_maisantiga','a_media'];
 /* ---- Resumo de faturamento e regionais (Assistência) — mesma regra do app: faturado = NFS-e + data de faturamento;
    meta = Período da Meta configurado no app; meses inteiros com Faturamento Histórico manual usam esse valor ---- */
 function assistFatPeriodo(a,b,reg){
@@ -683,7 +693,7 @@ function resumoAssistHtml(s){
     const fs=os.filter(o=>o.fat&&o.fat>=s&&o.fat<=fim);
     const meta=pv?(rg==null?(cfg.regioes||[]).reduce((t,r)=>t+n((cfg.metas||{})[r]),0):n((cfg.metas||{})[rg])):0;
     const real=perOk?assistFatPeriodo(cfg.periodoInicio,perFim,rg):0;
-    return {abertas:os.filter(o=>o.ab>=s&&o.ab<=fim).length, andamento:os.filter(o=>o.aberta).length, fatQtd:fs.length, fatSem:fs.reduce((t,o)=>t+o.valor,0),
+    return {pausadas:os.filter(o=>o.pausada).length, andamento:os.filter(o=>o.aberta&&!o.pausada).length, pendQtd:os.filter(o=>o.pend).length, fatQtd:fs.length, fatSem:fs.reduce((t,o)=>t+o.valor,0),
       fatAnt:os.filter(o=>o.fat&&o.fat>=ant&&o.fat<=fimAnt).reduce((t,o)=>t+o.valor,0), fatMes:assistFatPeriodo(mesIni,fim,rg), pend:os.filter(o=>o.pend).reduce((t,o)=>t+o.valor,0), meta, real};
   };
   const T=linha(null); const R=regs.map(rg=>({rg,...linha(rg)}));
@@ -691,10 +701,10 @@ function resumoAssistHtml(s){
   let h=`<div class="block-title">Resumo de faturamento</div><div class="totals-strip" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">`+
     tbox('Faturado na semana',brl0(T.fatSem),`${int(T.fatQtd)} OS · sem. anterior ${brl0(T.fatAnt)} ${deltaHtml(T.fatSem,T.fatAnt)}`,{accent:true})+
     tbox('Faturado em '+mesNome,brl0(T.fatMes),`de ${ddmm(mesIni)} até ${ddmm(fim)}`)+
-    tbox('Pendente de faturar',brl0(T.pend),`${int(T.andamento)} OS em andamento (situação atual)`)+`</div>`;
-  h+=`<div class="card"><h3>Por regional <span class="h3-side">semana ${ddmm(s)} a ${ddmm(fim)}</span></h3><div class="tablewrap"><table class="dt"><thead><tr><th>Regional</th><th class="r">OS abertas</th><th class="r">Em andamento*</th><th class="r">OS faturadas</th><th class="r">Faturado semana</th><th class="r">Faturado no mês</th><th class="r">Pendente de faturar*</th></tr></thead><tbody>`+
-    R.map(x=>`<tr><td class="nome">${escapeHtml(x.rg)}</td><td class="num">${int(x.abertas)}</td><td class="num">${int(x.andamento)}</td><td class="num">${int(x.fatQtd)}</td><td class="num">${brl0(x.fatSem)}</td><td class="num">${brl0(x.fatMes)}</td><td class="num">${brl0(x.pend)}</td></tr>`).join('')+
-    `<tr class="total-row"><td>TOTAL</td><td class="num">${int(T.abertas)}</td><td class="num">${int(T.andamento)}</td><td class="num">${int(T.fatQtd)}</td><td class="num">${brl0(T.fatSem)}</td><td class="num">${brl0(T.fatMes)}</td><td class="num">${brl0(T.pend)}</td></tr></tbody></table></div>
+    tbox('Fechadas pendente faturamento',brl0(T.pend),`${int(T.pendQtd)} OS · ${int(T.andamento)} em andamento · ${int(T.pausadas)} pausadas (situação atual)`)+`</div>`;
+  h+=`<div class="card"><h3>Por regional <span class="h3-side">semana ${ddmm(s)} a ${ddmm(fim)}</span></h3><div class="tablewrap"><table class="dt"><thead><tr><th>Regional</th><th class="r">OS pausadas*</th><th class="r">Em andamento*</th><th class="r">Fechadas e faturadas</th><th class="r">Faturado semana</th><th class="r">Faturado no mês</th><th class="r">Fechadas pend. faturamento*</th><th class="r">Pendente de faturar*</th></tr></thead><tbody>`+
+    R.map(x=>`<tr><td class="nome">${escapeHtml(x.rg)}</td><td class="num">${int(x.pausadas)}</td><td class="num">${int(x.andamento)}</td><td class="num">${int(x.fatQtd)}</td><td class="num">${brl0(x.fatSem)}</td><td class="num">${brl0(x.fatMes)}</td><td class="num">${int(x.pendQtd)}</td><td class="num">${brl0(x.pend)}</td></tr>`).join('')+
+    `<tr class="total-row"><td>TOTAL</td><td class="num">${int(T.pausadas)}</td><td class="num">${int(T.andamento)}</td><td class="num">${int(T.fatQtd)}</td><td class="num">${brl0(T.fatSem)}</td><td class="num">${brl0(T.fatMes)}</td><td class="num">${int(T.pendQtd)}</td><td class="num">${brl0(T.pend)}</td></tr></tbody></table></div>
     <div class="note">* Situação atual do app (não depende da semana). Faturado = OS com NFS-e e data de faturamento, como no app de Assistência.</div></div>`;
   return h;
 }
@@ -924,7 +934,7 @@ function renderLanc(){
   let html=`<div class="meta-row" id="lanc-meta">${pillStatus(st)}${u?`<span>Último lançamento: ${escapeHtml(u.u||'—')} em ${new Date(u.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>`:''}${pode?'':'<span class="pill pend">somente visualização</span>'}</div>`;
   if(eq.tipo!=='manual'){
     const nome=fonteDe(eq).nome, carregado=!!ext[fonteDe(eq).k];
-    html+=`<div class="note ${carregado?'':'warn'}">As colunas em <b style="color:var(--azul-claro)">verde</b> vêm automaticamente do app <b>${nome}</b> (somadas na semana, ${eq.tipo==='treinamentos'?'total da empresa; interno = funcionários, externo = clientes; só participações aprovadas/concluídas':'por loja'}). ${carregado?`Leitura feita às ${ext.quando?ext.quando.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):''}.`:'O app ainda não foi lido (faça login) — mostrando o histórico gravado.'}${eq.tipo==='assistencia'?' Indicadores de tempo corrido (em andamento, mais antiga, média, pendente) são da situação atual e ficam gravados como histórico de cada semana.':''} Colunas que o app não informa (ex.: KM RODADO) aparecem zeradas.</div>`;
+    html+=`<div class="note ${carregado?'':'warn'}">As colunas em <b style="color:var(--azul-claro)">verde</b> vêm automaticamente do app <b>${nome}</b> (somadas na semana, ${eq.tipo==='treinamentos'?'total da empresa; interno = funcionários, externo = clientes; só participações aprovadas/concluídas':'por loja'}). ${carregado?`Leitura feita às ${ext.quando?ext.quando.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):''}.`:'O app ainda não foi lido (faça login) — mostrando o histórico gravado.'}${eq.tipo==='assistencia'?' Indicadores de tempo corrido (pausadas, em andamento, fechadas pendentes de faturamento, mais antiga, média) são da situação atual e ficam gravados como histórico de cada semana.':''} Colunas que o app não informa (ex.: KM RODADO) aparecem zeradas.</div>`;
   }
   if(!cols.length){ body.innerHTML=html+'<div class="empty">Esta equipe ainda não tem campos. Um administrador pode criá-los em Equipes &amp; Campos.</div>'; return; }
   if(!ls.length){ html+=`<div class="empty">Nenhuma ${escapeHtml((eq.rotuloLinha||'linha').toLowerCase())} cadastrada.</div>`; }
