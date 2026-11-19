@@ -296,6 +296,8 @@ body:not(.is-admin) .somente-admin{display:none !important;}
       <div class="add-row" style="align-items:center;">
         <input type="file" id="inp-xlsx" accept=".xlsx,.xlsm,.xls" style="border:none;background:transparent;padding:0;">
         <label class="check"><input type="checkbox" id="chk-criar-campos"> criar campos para colunas não encontradas</label>
+        <label class="check" title="A planilha registra na segunda-feira o resultado da semana que terminou no domingo"><input type="checkbox" id="chk-seg-dom" checked> data de segunda-feira = semana anterior (segunda vira domingo)</label>
+        <label class="check" title="Apaga os lançamentos que vieram de importações anteriores das equipes desta planilha antes de gravar os novos; lançamentos digitados no app não são tocados"><input type="checkbox" id="chk-refazer" checked> refazer: substituir o histórico importado antes</label>
       </div>
       <div id="import-preview"></div>
     </div>
@@ -1229,16 +1231,17 @@ let importPend=null;
 document.getElementById('inp-xlsx').addEventListener('change',async e=>{
   const f=e.target.files[0]; if(!f) return;
   const box=document.getElementById('import-preview'); box.innerHTML='<div class="note">Lendo planilha…</div>';
-  try{ await loadXlsx(); const wb=XLSX.read(await f.arrayBuffer(),{type:'array',cellDates:true}); importPend=analisarPlanilha(wb,document.getElementById('chk-criar-campos').checked); mostrarPrevia(); }
+  try{ await loadXlsx(); const wb=XLSX.read(await f.arrayBuffer(),{type:'array',cellDates:true}); importPend=analisarPlanilha(wb,document.getElementById('chk-criar-campos').checked,document.getElementById('chk-seg-dom').checked); mostrarPrevia(); }
   catch(err){ box.innerHTML=`<div class="note warn">Não foi possível ler: ${escapeHtml(err.message||String(err))}</div>`; }
 });
+['chk-seg-dom','chk-refazer','chk-criar-campos'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{ const f=document.getElementById('inp-xlsx'); if(f.files&&f.files[0]) f.dispatchEvent(new Event('change')); }));
 function dataExcel(v){
   if(v instanceof Date){ if(isNaN(v)) return null; const d=new Date(v.getTime()+12*3600e3); if(d.getFullYear()<2000) return null; return isoStr(new Date(d.getFullYear(),d.getMonth(),d.getDate())); }
   if(typeof v==='number'&&v>30000){ const d=new Date(Date.UTC(1899,11,30)+v*86400000); return isoStr(new Date(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())); }
   if(typeof v==='string'){ let m=v.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return `${m[1]}-${m[2]}-${m[3]}`; m=v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); if(m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`; }
   return null;
 }
-function analisarPlanilha(wb,criarCampos){
+function analisarPlanilha(wb,criarCampos,segDom){
   const abas={}; wb.SheetNames.forEach(nm=>abas[norm(nm)]=nm);
   const res={equipes:[],registros:{},novasLinhas:{},novosCampos:{}};
   state.config.equipes.forEach(eq=>{
@@ -1258,7 +1261,8 @@ function analisarPlanilha(wb,criarCampos){
       if(c) mapa.push({i,c}); else ignoradas.push(h); });
     let n_=0; const semanas=new Set(), linhasVistas=new Map();
     for(let r=hi+1;r<rows.length;r++){
-      const row=rows[r]; if(!row) continue; const d=dataExcel(row[iD]); if(!d) continue;
+      const row=rows[r]; if(!row) continue; let d=dataExcel(row[iD]); if(!d) continue;
+      if(segDom&&D(d).getDay()===1) d=isoStr(addDays(D(d),-1)); // segunda-feira -> domingo (semana anterior)
       let ln=iL>=0?row[iL]:'GERAL'; if(ln==null||ln===''||ln===0||norm(ln)==='TOTAL') continue; ln=String(ln).trim(); if(eq.tipo==='manual'&&/^r\d$/i.test(ln)) ln=ln.toUpperCase();
       const vals=mapa.filter(m=>row[m.i]!=null&&row[m.i]!=='');
       if(!vals.length) continue;
@@ -1287,12 +1291,16 @@ function mostrarPrevia(){
   const p=importPend, box=document.getElementById('import-preview');
   if(!p.equipes.length){ box.innerHTML='<div class="note warn">Nenhuma aba da planilha corresponde às equipes (veja "Aba do Excel" em Equipes &amp; Campos).</div>'; return; }
   box.innerHTML=`<div class="tablewrap" style="margin-top:10px;"><table class="dt"><thead><tr><th>Equipe</th><th>Aba</th><th class="r">Linhas lidas</th><th class="r">Semanas</th><th>Período</th><th class="r">Campos casados</th><th class="r">Novas linhas</th><th>Colunas ignoradas</th></tr></thead><tbody>${p.equipes.map(x=>x.erro?`<tr><td>${escapeHtml(x.eq.nome)}</td><td colspan="7" style="color:var(--erro)">${escapeHtml(x.erro)}</td></tr>`:`<tr><td class="nome">${escapeHtml(x.eq.nome)}</td><td>${escapeHtml(x.aba)}</td><td class="num">${int(x.linhas)}</td><td class="num">${x.semanas}</td><td>${x.de?ddmm(x.de)+'/'+x.de.slice(0,4)+' a '+ddmm(x.ate)+'/'+x.ate.slice(0,4):'—'}</td><td class="num">${x.campos}</td><td class="num">${x.novas}</td><td style="font-size:.7rem;color:var(--texto-suave);">${escapeHtml(x.ignoradas.join(', '))||'—'}</td></tr>`).join('')}</tbody></table></div>
-    <div class="note">Serão gravados <b>${int(Object.keys(p.registros).length)}</b> lançamentos semanais. Lançamentos já existentes na mesma semana/linha serão substituídos pelos da planilha. Linhas que não aparecem nas últimas 12 semanas de cada aba entram como inativas (o histórico aparece no painel). Nas equipes em que a linha vem do e-mail, os nomes da planilha que batem com um e-mail cadastrado (ex.: ALANA → alana.xavier) entram na linha dessa pessoa; os demais ficam só como histórico.</div>
+    <div class="note">Serão gravados <b>${int(Object.keys(p.registros).length)}</b> lançamentos semanais.${document.getElementById('chk-refazer').checked?` Antes disso, <b>${int(Object.values(state.registros).filter(r=>r.u==='importação planilha'&&p.equipes.some(x=>!x.erro&&x.eq.id===r.e)).length)}</b> lançamentos de importações anteriores dessas equipes serão substituídos (o que foi digitado no app não é tocado).`:''}${document.getElementById('chk-seg-dom').checked?' Datas de segunda-feira entram na semana anterior.':''} Lançamentos já existentes na mesma semana/linha serão substituídos pelos da planilha. Linhas que não aparecem nas últimas 12 semanas de cada aba entram como inativas (o histórico aparece no painel). Nas equipes em que a linha vem do e-mail, os nomes da planilha que batem com um e-mail cadastrado (ex.: ALANA → alana.xavier) entram na linha dessa pessoa; os demais ficam só como histórico.</div>
     <div style="display:flex;gap:10px;"><button class="btn primary" id="btn-conf-import" type="button">Confirmar importação</button><button class="btn ghost" id="btn-canc-import" type="button">Cancelar</button></div>`;
   document.getElementById('btn-canc-import').onclick=()=>{importPend=null;box.innerHTML='';document.getElementById('inp-xlsx').value='';};
   document.getElementById('btn-conf-import').onclick=()=>{
     Object.entries(p.novasLinhas).forEach(([id,ls])=>{const eq=eqById(id); ls.forEach(l=>{if(!eq.linhas.find(x=>x.id===l.id)) eq.linhas.push(l);}); if(ls.length) marcarCfg('eq:'+id);});
     Object.entries(p.novosCampos).forEach(([id,cs])=>{const eq=eqById(id); cs.forEach(c=>eq.campos.push(c)); if(cs.length) marcarCfg('eq:'+id);});
+    if(document.getElementById('chk-refazer').checked){
+      const eqs=new Set(p.equipes.filter(x=>!x.erro).map(x=>x.eq.id));
+      Object.keys(state.registros).forEach(k=>{ const r=state.registros[k]; if(r.u==='importação planilha'&&eqs.has(r.e)&&!p.registros[k]){ delete state.registros[k]; marcarReg(k); } });
+    }
     Object.entries(p.registros).forEach(([k,r])=>{state.registros[k]=r; marcarReg(k);});
     save(); importPend=null; box.innerHTML='<div class="note">✓ Importação concluída. Os dados já aparecem no Painel.</div>'; document.getElementById('inp-xlsx').value=''; toast('Histórico importado.');
   };
