@@ -350,7 +350,7 @@ function withDefaults(s){
   if(!Array.isArray(s.config.equipes)) s.config.equipes=d.config.equipes;
   s.config.fontes=Object.assign({},d.config.fontes,s.config.fontes||{});
   s.config.equipes.forEach(eq=>{
-    eq.linhas=eq.linhas||[]; eq.membros=eq.membros||[]; eq.campos=eq.campos||[]; eq.segmentos=eq.segmentos||[];
+    eq.linhas=eq.linhas||[]; eq.membros=eq.membros||[]; if(eq.linhasPorEmail===undefined) eq.linhasPorEmail=eq.tipo==='manual'; eq.campos=eq.campos||[]; eq.segmentos=eq.segmentos||[];
     eq.excel=Object.assign({aba:'',colLinha:'',colSeg:'',colRegional:''},eq.excel||{});
     eq.campos.forEach(c=>{ c.opcoes=c.opcoes||[]; c.aliases=c.aliases||[]; if(!c.agreg) c.agreg='soma'; if(c.ativo===undefined) c.ativo=true; });
   });
@@ -441,6 +441,29 @@ function linhasEquipe(eq,opts){
       if(!mapa.has(r.l)){ const cad=eq.linhas.find(x=>x.id===r.l); mapa.set(r.l,cad?{...cad,origem:'hist'}:{id:r.l,nome:r.l.replace(/^l_/,'').replace(/-/g,' ').toUpperCase(),regional:'',origem:'hist'}); } }
   }
   return Array.from(mapa.values());
+}
+/* ---- linhas a partir do e-mail de quem preenche: alana.xavier@... -> "alana.xavier" ---- */
+function porEmail(eq){return eq.tipo==='manual'&&eq.linhasPorEmail!==false;}
+function nomeDoEmail(em){return String(em||'').split('@')[0].trim().toLowerCase();}
+function chaveEmail(em){return norm(nomeDoEmail(em).replace(/[._\-]+/g,' '));}
+/* linha antiga (ex.: "ALANA", "DIEGO SANTOS") que corresponde ao e-mail — só quando é única */
+function casaNomeEmail(nome,em){const a=chaveEmail(em),b=norm(nome);return !!b&&(a===b||a.startsWith(b+' '));}
+function linhaDoMembro(eq,em){em=String(em).toLowerCase();return eq.linhas.find(l=>(l.email||'').toLowerCase()===em);}
+function vincularMembro(eq,em,reg){
+  em=String(em).toLowerCase(); if(!porEmail(eq)) return null;
+  let l=linhaDoMembro(eq,em);
+  if(!l){ const c=eq.linhas.filter(x=>!x.email&&casaNomeEmail(x.nome,em)); if(c.length===1) l=c[0]; }
+  if(!l){ const id=linhaId(eq,nomeDoEmail(em)); l=eq.linhas.find(x=>x.id===id&&!x.email); if(!l){ l={id,nome:'',regional:'',ativo:true}; eq.linhas.push(l);} }
+  l.email=em; l.nome=nomeDoEmail(em); l.ativo=true; if(reg) l.regional=String(reg).trim().toUpperCase();
+  return l;
+}
+/* garante que todo e-mail cadastrado tenha sua linha (roda para o admin ao abrir) */
+function sincronizarMembros(){
+  let mudou=false;
+  state.config.equipes.forEach(eq=>{ if(!porEmail(eq)) return; let m=false;
+    eq.membros.forEach(em=>{ const l=linhaDoMembro(eq,em); if(!l||l.nome!==nomeDoEmail(em)){ vincularMembro(eq,em); m=true; } });
+    if(m){ dirtyConfig.add('eq:'+eq.id); mudou=true; } });
+  if(mudou) save();
 }
 let _idx=null,_idxStamp='',stateGen=0;
 function regIdx(){ const ks=Object.keys(state.registros); const st=stateGen+'|'+ks.length; if(_idx&&_idxStamp===st) return _idx;
@@ -762,13 +785,14 @@ function renderLanc(){
     if(g) html+=`<div class="seg-title"><i style="background:${SEG_CORES[gi%5]}"></i>${escapeHtml(g)}</div>`;
     html+=`<div class="card" style="padding:10px;"><div class="tablewrap"><table class="dt" data-seg="${escapeHtml(g)}"><thead><tr><th>${escapeHtml(eq.rotuloLinha||'Linha')}</th>${eq.usaRegional?'<th>Reg.</th>':''}${cols.map(c=>`<th class="${isNum(c)?'r':''} ${c.auto?'auto':''}" title="${c.auto?'automático':''}">${escapeHtml(c.nome)}</th>`).join('')}</tr></thead><tbody>`;
     ls.forEach(l=>{
-      html+=`<tr><td class="nome">${escapeHtml(l.nome)}</td>${eq.usaRegional?`<td>${l.regional?`<span class="reg ${escapeHtml(l.regional)}">${escapeHtml(l.regional)}</span>`:''}</td>`:''}`;
+      const soLeitura=!pode||(porEmail(eq)&&!l.email);
+      html+=`<tr><td class="nome">${escapeHtml(l.nome)}${porEmail(eq)&&!l.email?' <span class="pill pend" title="Linha antiga sem e-mail — ligue a um e-mail em Equipes &amp; Campos para editar">histórico</span>':''}</td>${eq.usaRegional?`<td>${l.regional?`<span class="reg ${escapeHtml(l.regional)}">${escapeHtml(l.regional)}</span>`:''}</td>`:''}`;
       cols.forEach(c=>{
         const v=valor(s,eq,l.id,g,c);
         if(c.auto){ const live=autoVal(eq,s,l.id,c.auto)!==undefined; html+=`<td class="auto ${live?'':'hist'}" title="${live?'do app':'histórico gravado'}">${fmt(c,v)}</td>`; return; }
         const val=temValor(v)?v:'';
         const da=`data-l="${l.id}" data-g="${escapeHtml(g)}" data-c="${c.id}"`;
-        if(!pode){ html+=`<td class="${isNum(c)?'num':''}">${fmt(c,v)}</td>`; return; }
+        if(soLeitura){ html+=`<td class="${isNum(c)?'num':''}">${fmt(c,v)}</td>`; return; }
         if(c.tipo==='lista') html+=`<td><select ${da}><option value=""></option>${c.opcoes.map(o=>`<option ${String(val)===o?'selected':''}>${escapeHtml(o)}</option>`).join('')}</select></td>`;
         else if(c.tipo==='texto') html+=`<td><input type="text" ${da} value="${escapeHtml(val)}"></td>`;
         else html+=`<td><input type="number" step="any" inputmode="decimal" ${da} value="${escapeHtml(val)}"></td>`;
@@ -781,7 +805,9 @@ function renderLanc(){
     const nums=camposNum(eq);
     html+=`<div class="card" style="padding:10px;"><div class="tablewrap"><table class="dt"><thead><tr><th>TOTAL GERAL</th>${nums.map(c=>`<th class="r">${escapeHtml(c.nome)}</th>`).join('')}</tr></thead><tbody><tr class="total-row" id="lanc-total-geral"><td>Todas</td>${nums.map(c=>`<td class="num" data-tc="${c.id}">${fmt(c,totalSemana(eq,s,c))}</td>`).join('')}</tr></tbody></table></div></div>`;
   }
-  if(pode){
+  if(pode&&porEmail(eq)){
+    html+=`<div class="note">As linhas desta equipe vêm dos e-mails cadastrados em <b>Equipes &amp; Campos › Quem preenche</b> (nome = parte antes do @). Para incluir ou retirar alguém, fale com o administrador.</div>`;
+  } else if(pode){
     html+=`<div class="card"><h3>Linhas da equipe · ${escapeHtml(eq.rotuloLinha||'Linha')} <span class="h3-side">inclua quem entrou na equipe ou retire quem saiu</span></h3>
       <div class="add-row"><input type="text" id="nova-linha" placeholder="Nome do(a) ${escapeHtml((eq.rotuloLinha||'linha').toLowerCase())}">${eq.usaRegional?`<input type="text" id="nova-linha-reg" placeholder="Regional (ex.: R1)" style="max-width:160px;min-width:120px;">`:''}<button class="btn ghost small" id="btn-add-linha" type="button">+ Adicionar</button></div>
       <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px;">${eq.linhas.filter(l=>l.ativo!==false).map(l=>`<span class="chip" style="cursor:default;">${escapeHtml(l.nome)} <button class="btn icon danger" data-desativa="${l.id}" type="button" title="Retirar da lista (o histórico é mantido)">×</button></span>`).join('')}</div></div>`;
@@ -843,7 +869,7 @@ function renderCampos(){
       <div class="field"><label>Nome da equipe</label><input type="text" id="e-nome" value="${escapeHtml(eq.nome)}"></div>
       <div class="field"><label>Cada linha é um(a)…</label><input type="text" id="e-rotulo" value="${escapeHtml(eq.rotuloLinha||'')}" placeholder="Vendedor, Loja, Regional…"></div>
       <div class="field"><label>Segmentos (blocos) — separados por vírgula</label><input type="text" id="e-segs" value="${escapeHtml(eq.segmentos.join(', '))}" placeholder="ex.: FRIO, MORNO, QUENTE"></div>
-      <div class="field"><label>&nbsp;</label><label class="check"><input type="checkbox" id="e-reg" ${eq.usaRegional?'checked':''}> usa Regional nas linhas</label><label class="check"><input type="checkbox" id="e-ativo" ${eq.ativo!==false?'checked':''}> equipe ativa</label></div>
+      <div class="field"><label>&nbsp;</label><label class="check"><input type="checkbox" id="e-reg" ${eq.usaRegional?'checked':''}> usa Regional nas linhas</label><label class="check"><input type="checkbox" id="e-ativo" ${eq.ativo!==false?'checked':''}> equipe ativa</label>${eq.tipo==='manual'?`<label class="check"><input type="checkbox" id="e-email" ${porEmail(eq)?'checked':''}> nome da linha vem do e-mail de quem preenche</label>`:''}</div>
     </div></div>`;
   // campos
   h+=`<div class="card"><h3>Campos que a equipe preenche <span class="h3-side">desmarque "Ativo" para esconder sem perder o histórico</span></h3><div class="tablewrap" style="max-height:none;"><table class="dt cfg"><thead><tr><th></th><th>Campo</th><th>Tipo</th><th>Opções (lista)</th><th>Total da equipe</th><th class="r">Meta semanal</th><th>Destaque</th><th>Ativo</th><th></th></tr></thead><tbody>`;
@@ -865,16 +891,20 @@ function renderCampos(){
     <div class="note">"Destaque" coloca o campo nos quadros do Painel. "Total da equipe" define como somar as linhas (soma, média ou máximo). Remover um campo que já tem dados apenas o esconde — o histórico fica guardado.</div></div>`;
   // linhas
   const fl=fonteLinhas(eq);
-  h+=`<div class="card"><h3>Linhas · ${escapeHtml(eq.rotuloLinha||'Linha')} <span class="h3-side">${eq.tipo!=='manual'?'as lojas/bases do app entram sozinhas; aqui dá para incluir outras ou esconder':'cada linha é uma linha da tabela de lançamento'}</span></h3>
-    <div class="tablewrap" style="max-height:360px;"><table class="dt cfg"><thead><tr><th>Nome</th>${eq.usaRegional?'<th>Regional</th>':''}<th>Ativa</th><th></th></tr></thead><tbody>
-    ${eq.linhas.map(l=>`<tr class="${l.ativo===false?'inativo':''}"><td><input type="text" data-lnome="${l.id}" value="${escapeHtml(l.nome)}"></td>${eq.usaRegional?`<td><input type="text" data-lreg="${l.id}" value="${escapeHtml(l.regional||'')}" style="max-width:110px;"></td>`:''}<td style="text-align:center;"><input type="checkbox" data-lativo="${l.id}" ${l.ativo!==false?'checked':''}></td><td><button class="btn icon danger" data-lrem="${l.id}" type="button">🗑</button></td></tr>`).join('')}
+  const pe=porEmail(eq);
+  const semLinha=pe?eq.membros.filter(em=>!linhaDoMembro(eq,em)):[];
+  const ordLinhas=pe?eq.linhas.slice().sort((a,b)=>(!!b.email-!!a.email)||((b.ativo!==false)-(a.ativo!==false))||a.nome.localeCompare(b.nome)):eq.linhas;
+  h+=`<div class="card"><h3>Linhas · ${escapeHtml(eq.rotuloLinha||'Linha')} <span class="h3-side">${eq.tipo!=='manual'?'as lojas/bases do app entram sozinhas; aqui dá para incluir outras ou esconder':pe?'criadas a partir dos e-mails de quem preenche':'cada linha é uma linha da tabela de lançamento'}</span></h3>
+    ${pe?`<div class="note">O nome de cada linha vem do e-mail cadastrado em <b>Quem preenche</b> (ex.: alana.xavier@mcpoirrigacao.com.br → <b>alana.xavier</b>). Linhas antigas da planilha (sem e-mail) ficam só como histórico; use a coluna <b>E-mail</b> para ligar uma delas a quem preenche e manter o histórico na mesma linha.</div>`:''}
+    <div class="tablewrap" style="max-height:420px;"><table class="dt cfg"><thead><tr><th>Nome</th>${pe?'<th>E-mail</th>':''}${eq.usaRegional?'<th>Regional</th>':''}<th>Ativa</th><th></th></tr></thead><tbody>
+    ${ordLinhas.map(l=>`<tr class="${l.ativo===false?'inativo':''}"><td>${pe&&l.email?`<b>${escapeHtml(l.nome)}</b>`:`<input type="text" data-lnome="${l.id}" value="${escapeHtml(l.nome)}">`}</td>${pe?`<td>${l.email?`<span style="font-size:.76rem;">${escapeHtml(l.email)}</span>`:(eq.membros.length?`<select data-lvinc="${l.id}"><option value="">— histórico (sem e-mail) —</option>${eq.membros.map(em=>`<option value="${escapeHtml(em)}">${escapeHtml(em)}</option>`).join('')}</select>`:'<span style="font-size:.72rem;color:var(--texto-suave);">histórico</span>')}</td>`:''}${eq.usaRegional?`<td><input type="text" data-lreg="${l.id}" value="${escapeHtml(l.regional||'')}" style="max-width:110px;"></td>`:''}<td style="text-align:center;"><input type="checkbox" data-lativo="${l.id}" ${l.ativo!==false?'checked':''}></td><td><button class="btn icon danger" data-lrem="${l.id}" type="button">🗑</button></td></tr>`).join('')}
     ${fl.filter(x=>!eq.linhas.find(l=>l.id===x.id)).map(x=>`<tr><td>${escapeHtml(x.nome)} <span class="pill auto">do app</span></td>${eq.usaRegional?'<td></td>':''}<td style="text-align:center;"><input type="checkbox" checked data-lapp="${x.id}" data-lappnome="${escapeHtml(x.nome)}"></td><td></td></tr>`).join('')}
     </tbody></table></div>
-    <div class="add-row"><input type="text" id="cfg-nova-linha" placeholder="Nome">${eq.usaRegional?'<input type="text" id="cfg-nova-linha-reg" placeholder="Regional" style="max-width:140px;min-width:100px;">':''}<button class="btn ghost small" id="cfg-add-linha" type="button">+ Adicionar</button></div></div>`;
+    ${pe?'':`<div class="add-row"><input type="text" id="cfg-nova-linha" placeholder="Nome">${eq.usaRegional?'<input type="text" id="cfg-nova-linha-reg" placeholder="Regional" style="max-width:140px;min-width:100px;">':''}<button class="btn ghost small" id="cfg-add-linha" type="button">+ Adicionar</button></div>`}</div>`;
   // membros
   h+=`<div class="card"><h3>Quem preenche esta equipe <span class="h3-side">e-mails Microsoft — veem e editam só esta equipe</span></h3>
-    ${eq.membros.length?eq.membros.map((m,i)=>`<div class="user-row"><span>👤 ${escapeHtml(m)}</span><button class="btn danger small" data-mrem="${i}" type="button">remover</button></div>`).join(''):'<div style="color:var(--texto-suave);font-size:.84rem;">Ninguém cadastrado — só administradores preenchem.</div>'}
-    <div class="add-row"><input type="text" id="novo-membro" placeholder="email@maqcampo.com.br"><button class="btn primary small" id="btn-add-membro" type="button">+ Adicionar</button></div></div>`;
+    ${eq.membros.length?eq.membros.map((m,i)=>{const l=pe?linhaDoMembro(eq,m):null;return `<div class="user-row"><span>👤 ${escapeHtml(m)}${l?` <span class="reg">linha: ${escapeHtml(l.nome)}${l.regional?' · '+escapeHtml(l.regional):''}</span>`:''}</span><button class="btn danger small" data-mrem="${i}" type="button">remover</button></div>`;}).join(''):'<div style="color:var(--texto-suave);font-size:.84rem;">Ninguém cadastrado — só administradores preenchem.</div>'}
+    <div class="add-row"><input type="text" id="novo-membro" placeholder="nome.sobrenome@mcpoirrigacao.com.br">${pe&&eq.usaRegional?'<input type="text" id="novo-membro-reg" placeholder="Regional (ex.: R1)" style="max-width:160px;min-width:110px;">':''}<button class="btn primary small" id="btn-add-membro" type="button">+ Adicionar</button></div></div>`;
   // importação
   h+=`<div class="card"><h3>Importação da planilha <span class="h3-side">usado em Parâmetros › Importar histórico</span></h3><div class="grid">
     <div class="field"><label>Aba do Excel</label><input type="text" id="x-aba" value="${escapeHtml(eq.excel.aba)}"></div>
@@ -890,6 +920,7 @@ function renderCampos(){
   bind('e-segs',el=>{eq.segmentos=el.value.split(',').map(x=>x.trim().toUpperCase()).filter(Boolean);});
   bind('e-reg',el=>{eq.usaRegional=el.checked;});
   bind('e-ativo',el=>{eq.ativo=el.checked;});
+  bind('e-email',el=>{eq.linhasPorEmail=el.checked; if(el.checked) eq.membros.forEach(em=>vincularMembro(eq,em));});
   bind('x-aba',el=>{eq.excel.aba=el.value.trim();}); bind('x-lin',el=>{eq.excel.colLinha=el.value.trim();});
   bind('x-seg',el=>{eq.excel.colSeg=el.value.trim();}); bind('x-reg',el=>{eq.excel.colRegional=el.value.trim();});
   // campos
@@ -931,7 +962,7 @@ function renderCampos(){
     else { if(!confirm(`Excluir "${l.nome}"?`)) return; eq.linhas=eq.linhas.filter(x=>x!==l); }
     mark(); renderCampos();
   });
-  document.getElementById('cfg-add-linha').onclick=()=>{
+  if(document.getElementById('cfg-add-linha')) document.getElementById('cfg-add-linha').onclick=()=>{
     const nome=document.getElementById('cfg-nova-linha').value.trim(); if(!nome) return;
     const reg=((document.getElementById('cfg-nova-linha-reg')||{}).value||'').trim().toUpperCase();
     const id=linhaId(eq,nome); const ex=eq.linhas.find(l=>l.id===id);
@@ -939,11 +970,27 @@ function renderCampos(){
     mark(); renderCampos();
   };
   // membros
-  body.querySelectorAll('[data-mrem]').forEach(b=>b.onclick=()=>{eq.membros.splice(+b.dataset.mrem,1);mark();renderCampos();});
+  body.querySelectorAll('[data-mrem]').forEach(b=>b.onclick=()=>{
+    const em=eq.membros[+b.dataset.mrem]; const l=pe?linhaDoMembro(eq,em):null;
+    if(!confirm(`Remover ${em} desta equipe?${l?` A linha "${l.nome}" fica inativa (o histórico continua guardado).`:''}`)) return;
+    eq.membros.splice(+b.dataset.mrem,1); if(l) l.ativo=false; mark(); renderCampos();
+  });
   document.getElementById('btn-add-membro').onclick=()=>{
     const em=document.getElementById('novo-membro').value.trim().toLowerCase(); if(!em||!em.includes('@')){toast('Informe um e-mail válido.');return;}
-    if(!low(eq.membros).includes(em)) eq.membros.push(em); mark(); renderCampos(); toast('Adicionado à equipe.');
+    const reg=((document.getElementById('novo-membro-reg')||{}).value||'').trim();
+    if(!low(eq.membros).includes(em)) eq.membros.push(em);
+    const l=vincularMembro(eq,em,reg); mark(); renderCampos(); toast(l?`Adicionado — linha "${l.nome}".`:'Adicionado à equipe.');
   };
+  body.querySelectorAll('[data-lvinc]').forEach(el=>el.addEventListener('change',()=>{
+    const em=el.value; if(!em) return; const hist=eq.linhas.find(x=>x.id===el.dataset.lvinc); const atual=linhaDoMembro(eq,em);
+    if(!confirm(`Ligar a linha "${hist.nome}" (histórico) a ${em}? Ela passa a se chamar "${nomeDoEmail(em)}" e os lançamentos dela continuam valendo.`)){el.value='';return;}
+    if(atual&&atual!==hist){
+      const usado=Object.values(state.registros).some(r=>r.e===eq.id&&r.l===atual.id);
+      if(usado){ delete atual.email; atual.ativo=false; atual.nome=atual.nome+' (antiga)'; } else eq.linhas=eq.linhas.filter(x=>x!==atual);
+      if(!hist.regional&&atual.regional) hist.regional=atual.regional;
+    }
+    hist.email=em.toLowerCase(); hist.nome=nomeDoEmail(em); hist.ativo=true; mark(); renderCampos(); toast('Linha ligada ao e-mail.');
+  }));
   document.getElementById('btn-del-equipe').onclick=()=>{
     const usado=Object.values(state.registros).some(r=>r.e===eq.id);
     if(usado){ if(!confirm(`"${eq.nome}" tem lançamentos. Ela será desativada (some do painel e do lançamento, mas o histórico fica). Continuar?`)) return; eq.ativo=false; mark(); }
@@ -1014,7 +1061,9 @@ function analisarPlanilha(wb,criarCampos){
       let ln=iL>=0?row[iL]:'GERAL'; if(ln==null||ln===''||ln===0||norm(ln)==='TOTAL') continue; ln=String(ln).trim(); if(eq.tipo==='manual'&&/^r\d$/i.test(ln)) ln=ln.toUpperCase();
       const vals=mapa.filter(m=>row[m.i]!=null&&row[m.i]!=='');
       if(!vals.length) continue;
-      const s=segunda(d), lid=linhaId(eq,ln), g=iS>=0&&eq.segmentos.length?String(row[iS]||'').trim().toUpperCase():'';
+      let lid=linhaId(eq,ln);
+      if(porEmail(eq)){ const c=eq.linhas.filter(x=>x.email&&casaNomeEmail(ln,x.email)); if(c.length===1) lid=c[0].id; }
+      const s=segunda(d), g=iS>=0&&eq.segmentos.length?String(row[iS]||'').trim().toUpperCase():'';
       if(eq.segmentos.length&&!eq.segmentos.includes(g)) continue;
       const k=rkey(s,eq.id,lid,g); const reg=res.registros[k]||(res.registros[k]={s,e:eq.id,l:lid,g,v:{},u:'importação planilha',t:new Date().toISOString()});
       vals.forEach(({i,c})=>{ let v=row[i]; if(isNum(c)||c.tipo==='inteiro'){ v=typeof v==='number'?v:Number(String(v).replace(/\./g,'').replace(',','.')); if(!isFinite(v)) return; }
@@ -1026,7 +1075,7 @@ function analisarPlanilha(wb,criarCampos){
       const prev=linhasVistas.get(lid); if(!prev||s>prev.ultima) linhasVistas.set(lid,{nome:nomeExib,regional:reg_||(prev&&prev.regional)||'',ultima:s});
     }
     const ult=Array.from(semanas).sort().pop();
-    const novas=[]; linhasVistas.forEach((x,id)=>{ if(!eq.linhas.find(l=>l.id===id)&&!fonteLinhas(eq).find(l=>l.id===id)) novas.push({id,nome:x.nome,regional:x.regional,ativo:!!ult&&x.ultima>=addSem(ult,-12)}); });
+    const novas=[]; linhasVistas.forEach((x,id)=>{ if(!eq.linhas.find(l=>l.id===id)&&!fonteLinhas(eq).find(l=>l.id===id)) novas.push({id,nome:x.nome,regional:x.regional,ativo:!porEmail(eq)&&!!ult&&x.ultima>=addSem(ult,-12)}); });
     res.novasLinhas[eq.id]=novas;
     const ss=Array.from(semanas).sort();
     res.equipes.push({eq,aba:nomeAba,linhas:n_,semanas:ss.length,de:ss[0],ate:ss[ss.length-1],campos:mapa.length,ignoradas,novas:novas.length});
@@ -1037,7 +1086,7 @@ function mostrarPrevia(){
   const p=importPend, box=document.getElementById('import-preview');
   if(!p.equipes.length){ box.innerHTML='<div class="note warn">Nenhuma aba da planilha corresponde às equipes (veja "Aba do Excel" em Equipes &amp; Campos).</div>'; return; }
   box.innerHTML=`<div class="tablewrap" style="margin-top:10px;"><table class="dt"><thead><tr><th>Equipe</th><th>Aba</th><th class="r">Linhas lidas</th><th class="r">Semanas</th><th>Período</th><th class="r">Campos casados</th><th class="r">Novas linhas</th><th>Colunas ignoradas</th></tr></thead><tbody>${p.equipes.map(x=>x.erro?`<tr><td>${escapeHtml(x.eq.nome)}</td><td colspan="7" style="color:var(--erro)">${escapeHtml(x.erro)}</td></tr>`:`<tr><td class="nome">${escapeHtml(x.eq.nome)}</td><td>${escapeHtml(x.aba)}</td><td class="num">${int(x.linhas)}</td><td class="num">${x.semanas}</td><td>${x.de?ddmm(x.de)+'/'+x.de.slice(0,4)+' a '+ddmm(x.ate)+'/'+x.ate.slice(0,4):'—'}</td><td class="num">${x.campos}</td><td class="num">${x.novas}</td><td style="font-size:.7rem;color:var(--texto-suave);">${escapeHtml(x.ignoradas.join(', '))||'—'}</td></tr>`).join('')}</tbody></table></div>
-    <div class="note">Serão gravados <b>${int(Object.keys(p.registros).length)}</b> lançamentos semanais. Lançamentos já existentes na mesma semana/linha serão substituídos pelos da planilha. Linhas que não aparecem nas últimas 12 semanas de cada aba entram como inativas (o histórico aparece no painel).</div>
+    <div class="note">Serão gravados <b>${int(Object.keys(p.registros).length)}</b> lançamentos semanais. Lançamentos já existentes na mesma semana/linha serão substituídos pelos da planilha. Linhas que não aparecem nas últimas 12 semanas de cada aba entram como inativas (o histórico aparece no painel). Nas equipes em que a linha vem do e-mail, os nomes da planilha que batem com um e-mail cadastrado (ex.: ALANA → alana.xavier) entram na linha dessa pessoa; os demais ficam só como histórico.</div>
     <div style="display:flex;gap:10px;"><button class="btn primary" id="btn-conf-import" type="button">Confirmar importação</button><button class="btn ghost" id="btn-canc-import" type="button">Cancelar</button></div>`;
   document.getElementById('btn-canc-import').onclick=()=>{importPend=null;box.innerHTML='';document.getElementById('inp-xlsx').value='';};
   document.getElementById('btn-conf-import').onclick=()=>{
@@ -1138,6 +1187,7 @@ function applyAccess(){
   if(nivel==='deslogado'){ovL.style.display='flex';ovN.style.display='none';return;}ovL.style.display='none';
   if(nivel==='bloqueado'){ovN.style.display='flex';document.getElementById('overlay-email-info').textContent='Logado como: '+emailAtual();return;}ovN.style.display='none';
   const adm=isAdmin(); document.body.classList.toggle('is-admin',adm);
+  if(adm&&msAccount) sincronizarMembros();
   if(!adm&&['campos','parametros'].includes(abaAtiva())) document.querySelector('#tabs button[data-tab="painel"]').click();
   const info=document.getElementById('ms-user-info'); if(msAccount){info.textContent='SharePoint › '+SP_PASTA+' · '+({admin:'administrador',visualizador:'visualizador',membro:'equipe: '+state.config.equipes.filter(ehMembro).map(e=>e.nome).join(', ')}[nivel]||'');}
 }
