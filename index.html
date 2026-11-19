@@ -536,7 +536,7 @@ function sincronizarMembros(){
   state.config.equipes.forEach(eq=>{ if(!porEmail(eq)) return; let m=false;
     eq.membros.forEach(em=>{ const l=linhaDoMembro(eq,em); if(!l||l.nome!==nomeDoEmail(em)){ vincularMembro(eq,em); m=true; } });
     const ms=low(eq.membros); eq.linhas.forEach(l=>{ if(l.email&&!ms.includes(l.email.toLowerCase())&&l.ativo!==false){ l.ativo=false; m=true; } });
-    if(m){ dirtyConfig.add('eq:'+eq.id); mudou=true; } });
+    if(m){ marcarCfg('eq:'+eq.id); mudou=true; } });
   if(mudou) save();
 }
 let _idx=null,_idxStamp='',stateGen=0;
@@ -738,7 +738,7 @@ function gravarSnapshots(){
       const k=rkey(s,eq.id,l.id,''); const sn=ext.assistSnap[l.id]; if(!sn&&!state.registros[k]) return;
       const r=state.registros[k]||{s,e:eq.id,l:l.id,g:'',v:{}}; let m=false;
       cs.forEach(c=>{ const v=sn?sn[c.auto]:0; if(r.v[c.id]!==v){ r.v[c.id]=v; m=true; } });
-      if(m){ state.registros[k]=r; r.auto=true; dirtyReg.add(k); mudou=true; }
+      if(m){ state.registros[k]=r; r.auto=true; marcarReg(k); mudou=true; }
     });
   });
   if(mudou) save();
@@ -973,7 +973,7 @@ function renderLanc(){
       if(v===''||v===null) delete r.v[c.id]; else r.v[c.id]=v;
       r.u=emailAtual()||'local'; r.t=new Date().toISOString();
       if(Object.keys(r.v).length) state.registros[k]=r; else delete state.registros[k];
-      dirtyReg.add(k); save(); atualizarTotaisLanc(eq);
+      marcarReg(k,c.id); save(); atualizarTotaisLanc(eq);
     };
     inp.addEventListener('change',handler);
     if(inp.tagName==='INPUT') inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); handler(); moverFoco(inp,e.shiftKey?-1:1); } });
@@ -984,12 +984,12 @@ function renderLanc(){
     const reg=(document.getElementById('nova-linha-reg')||{}).value||'';
     const id=linhaId(eq,nome); const ex=eq.linhas.find(l=>l.id===id);
     if(ex){ex.ativo=true; if(reg) ex.regional=reg.trim().toUpperCase();} else eq.linhas.push({id,nome,regional:reg.trim().toUpperCase(),ativo:true});
-    dirtyConfig.add('eq:'+eq.id); save(); renderLanc(); toast('Adicionado.');
+    marcarCfg('eq:'+eq.id); save(); renderLanc(); toast('Adicionado.');
   };
   body.querySelectorAll('[data-desativa]').forEach(b=>b.onclick=()=>{
     const l=eq.linhas.find(x=>x.id===b.dataset.desativa); if(!l) return;
     if(!confirm(`Retirar "${l.nome}" da lista? O histórico continua guardado.`)) return;
-    l.ativo=false; dirtyConfig.add('eq:'+eq.id); save(); renderLanc();
+    l.ativo=false; marcarCfg('eq:'+eq.id); save(); renderLanc();
   });
 }
 function moverFoco(inp,dir){ // Enter desce para a mesma coluna na próxima linha
@@ -1014,7 +1014,7 @@ function renderCampos(){
   document.querySelectorAll('#cfg-team-list button').forEach(b=>b.onclick=()=>{cfgEquipe=b.dataset.eq;renderCampos();});
   const eq=eqById(cfgEquipe); const body=document.getElementById('cfg-body');
   if(!eq){body.innerHTML='<div class="empty">Crie uma equipe.</div>';return;}
-  const mark=()=>{dirtyConfig.add('eq:'+eq.id);save();};
+  const mark=()=>{marcarCfg('eq:'+eq.id);save();};
   let h=`<div class="card"><h3>Equipe <span class="h3-side">${eq.tipo==='manual'?'preenchimento manual':'integrada ao app de '+fonteDe(eq).nome}</span></h3>
     <div class="grid">
       <div class="field"><label>Nome da equipe</label><input type="text" id="e-nome" value="${escapeHtml(eq.nome)}"></div>
@@ -1171,7 +1171,7 @@ function renderCampos(){
   document.getElementById('btn-del-equipe').onclick=()=>{
     const usado=Object.values(state.registros).some(r=>r.e===eq.id);
     if(usado){ if(!confirm(`"${eq.nome}" tem lançamentos. Ela será desativada (some do painel e do lançamento, mas o histórico fica). Continuar?`)) return; eq.ativo=false; mark(); }
-    else { if(!confirm(`Excluir a equipe "${eq.nome}"?`)) return; state.config.equipes=state.config.equipes.filter(x=>x!==eq); dirtyConfig.add('eq:'+eq.id); save(); cfgEquipe=null; }
+    else { if(!confirm(`Excluir a equipe "${eq.nome}"?`)) return; state.config.equipes=state.config.equipes.filter(x=>x!==eq); marcarCfg('eq:'+eq.id); save(); cfgEquipe=null; }
     renderCampos();
   };
 }
@@ -1179,7 +1179,7 @@ document.getElementById('btn-nova-equipe').onclick=()=>{
   const nome=prompt('Nome da nova equipe:'); if(!nome||!nome.trim()) return;
   let id=slug(nome); while(eqById(id)) id+='-2';
   state.config.equipes.push(E(id,nome.trim(),{rotuloLinha:'Linha',excel:{aba:nome.trim().toUpperCase(),colLinha:'',colSeg:'',colRegional:''}}));
-  dirtyConfig.add('eq:'+id); dirtyConfig.add('ordem'); save(); cfgEquipe=id; renderCampos();
+  marcarCfg('eq:'+id); marcarCfg('ordem'); save(); cfgEquipe=id; renderCampos();
 };
 
 /* ============================ PARÂMETROS ============================ */
@@ -1197,7 +1197,7 @@ document.getElementById('btn-salvar-fontes').onclick=()=>{
   F.pecas={pasta:document.getElementById('p-pecas-pasta').value.trim(),arquivo:document.getElementById('p-pecas-arq').value.trim()};
   F.assist={pasta:document.getElementById('p-ast-pasta').value.trim(),arquivo:document.getElementById('p-ast-arq').value.trim()};
   F.trein={pasta:document.getElementById('p-tr-pasta').value.trim(),arquivo:document.getElementById('p-tr-arq').value.trim()};
-  dirtyConfig.add('fontes'); save(); toast('Fontes salvas.'); carregarFontes(true).then(renderParametros);
+  marcarCfg('fontes'); save(); toast('Fontes salvas.'); carregarFontes(true).then(renderParametros);
 };
 document.getElementById('btn-reler-fontes').onclick=()=>{ if(!msAccount){toast('Entre com o Microsoft primeiro.');return;} carregarFontes(false).then(renderParametros); };
 document.getElementById('btn-export-json').onclick=()=>download(`followup_backup_${isoStr(new Date())}.json`,JSON.stringify(state,null,1),'application/json');
@@ -1269,9 +1269,9 @@ function mostrarPrevia(){
     <div style="display:flex;gap:10px;"><button class="btn primary" id="btn-conf-import" type="button">Confirmar importação</button><button class="btn ghost" id="btn-canc-import" type="button">Cancelar</button></div>`;
   document.getElementById('btn-canc-import').onclick=()=>{importPend=null;box.innerHTML='';document.getElementById('inp-xlsx').value='';};
   document.getElementById('btn-conf-import').onclick=()=>{
-    Object.entries(p.novasLinhas).forEach(([id,ls])=>{const eq=eqById(id); ls.forEach(l=>{if(!eq.linhas.find(x=>x.id===l.id)) eq.linhas.push(l);}); if(ls.length) dirtyConfig.add('eq:'+id);});
-    Object.entries(p.novosCampos).forEach(([id,cs])=>{const eq=eqById(id); cs.forEach(c=>eq.campos.push(c)); if(cs.length) dirtyConfig.add('eq:'+id);});
-    Object.entries(p.registros).forEach(([k,r])=>{state.registros[k]=r; dirtyReg.add(k);});
+    Object.entries(p.novasLinhas).forEach(([id,ls])=>{const eq=eqById(id); ls.forEach(l=>{if(!eq.linhas.find(x=>x.id===l.id)) eq.linhas.push(l);}); if(ls.length) marcarCfg('eq:'+id);});
+    Object.entries(p.novosCampos).forEach(([id,cs])=>{const eq=eqById(id); cs.forEach(c=>eq.campos.push(c)); if(cs.length) marcarCfg('eq:'+id);});
+    Object.entries(p.registros).forEach(([k,r])=>{state.registros[k]=r; marcarReg(k);});
     save(); importPend=null; box.innerHTML='<div class="note">✓ Importação concluída. Os dados já aparecem no Painel.</div>'; document.getElementById('inp-xlsx').value=''; toast('Histórico importado.');
   };
 }
@@ -1314,15 +1314,41 @@ async function ensureFolder(){if(_pastaOk)return true;const t=await getGraphToke
 
 /* ==================== CONCORRÊNCIA (ETag + mesclagem por registro / por equipe) ==================== */
 let cloudEtag=null,acessoEtag=null;
-const dirtyReg=new Set();
-const dirtyConfig=new Set(); // 'eq:<id>', 'ordem', 'fontes'
+/* Alterações ainda não confirmadas no SharePoint, com número de sequência:
+   dirtyReg: chave do lançamento -> Map(campoId -> seq)  ('*' = lançamento inteiro)
+   dirtyConfig: seção ('eq:<id>', 'ordem', 'fontes') -> seq
+   Ficam gravadas no aparelho, então nada se perde se a página fechar antes de salvar. */
+const DIRTY_KEY=STORE_KEY+'-pendente';
+const dirtyReg=new Map(), dirtyConfig=new Map(); let dirtySeq=0;
+function persistDirty(){try{localStorage.setItem(DIRTY_KEY,JSON.stringify({seq:dirtySeq,reg:Array.from(dirtyReg,([k,m])=>[k,Array.from(m)]),cfg:Array.from(dirtyConfig)}));}catch(e){}}
+(function restoreDirty(){try{const d=JSON.parse(localStorage.getItem(DIRTY_KEY)||'null');if(!d)return;dirtySeq=d.seq||0;(d.reg||[]).forEach(([k,a])=>dirtyReg.set(k,new Map(a)));(d.cfg||[]).forEach(([k,v])=>dirtyConfig.set(k,v));}catch(e){}})();
+function marcarReg(k,cid){let m=dirtyReg.get(k);if(!m){m=new Map();dirtyReg.set(k,m);}m.set(cid||'*',++dirtySeq);persistDirty();}
+function marcarCfg(sec){dirtyConfig.set(sec,++dirtySeq);persistDirty();}
+function dirtyCount(){return dirtyReg.size+dirtyConfig.size;}
+function fotoDirty(){return {reg:new Map(Array.from(dirtyReg,([k,m])=>[k,new Map(m)])),cfg:new Map(dirtyConfig)};}
+/* após salvar, remove só o que foi enviado e não mudou de novo durante o envio */
+function limparEnviados(f){
+  f.reg.forEach((m,k)=>{const cur=dirtyReg.get(k);if(!cur)return;m.forEach((seq,cid)=>{if(cur.get(cid)===seq)cur.delete(cid);});if(!cur.size)dirtyReg.delete(k);});
+  f.cfg.forEach((seq,sec)=>{if(dirtyConfig.get(sec)===seq)dirtyConfig.delete(sec);});
+  persistDirty();
+}
+window.addEventListener('beforeunload',e=>{ if(msAccount&&(dirtyCount()||salvando)){ e.preventDefault(); e.returnValue=''; } });
 let salvando=false,pendente=false;
 function setSyncStatus(t,c){const el=document.getElementById('sync-status');if(!el)return;el.textContent=t;el.className='sync-status '+(c||'');el.style.display=t?'block':'none';}
 function aplicarLocalSobre(base){
   base=withDefaults(clone(base));
   const res={config:base.config,registros:base.registros};
-  dirtyReg.forEach(id=>{ if(state.registros[id]) res.registros[id]=clone(state.registros[id]); else delete res.registros[id]; });
-  dirtyConfig.forEach(sec=>{
+  /* mescla campo a campo: só os campos que ESTE usuário alterou substituem os do servidor */
+  dirtyReg.forEach((m,k)=>{
+    const loc=state.registros[k];
+    if(m.has('*')){ if(loc) res.registros[k]=clone(loc); else delete res.registros[k]; return; }
+    let b=res.registros[k]?clone(res.registros[k]):null;
+    m.forEach((seq,cid)=>{ const v=loc&&loc.v?loc.v[cid]:undefined;
+      if(v===undefined||v===''){ if(b&&b.v) delete b.v[cid]; }
+      else { if(!b) b={s:loc.s,e:loc.e,l:loc.l,g:loc.g,v:{}}; b.v=b.v||{}; b.v[cid]=v; } });
+    if(b){ if(loc&&loc.t&&(!b.t||loc.t>b.t)){ b.u=loc.u; b.t=loc.t; } if(Object.keys(b.v||{}).length) res.registros[k]=b; else delete res.registros[k]; }
+  });
+  dirtyConfig.forEach((seq,sec)=>{
     if(sec.startsWith('eq:')){ const id=sec.slice(3); const loc=state.config.equipes.find(e=>e.id===id); const i=res.config.equipes.findIndex(e=>e.id===id);
       if(loc){ if(i>=0) res.config.equipes[i]=clone(loc); else res.config.equipes.push(clone(loc)); } else if(i>=0) res.config.equipes.splice(i,1); }
     else if(sec==='ordem'){ const ord=state.config.equipes.map(e=>e.id); res.config.equipes.sort((a,b)=>{const ia=ord.indexOf(a.id),ib=ord.indexOf(b.id);return (ia<0?999:ia)-(ib<0?999:ib);}); }
@@ -1336,27 +1362,42 @@ async function sincronizarNuvem(silencioso){
   const ac=await graphGetJsonEtag(spPath(ACESSO_FILE));
   if(ac.ok&&ac.data&&(ac.data.emailsAutorizados||ac.data.emailsComuns)){acesso={emailsAutorizados:ac.data.emailsAutorizados||[],emailsComuns:ac.data.emailsComuns||[]};acessoEtag=ac.etag;}
   const dd=await graphGetJsonEtag(spPath(DADOS_FILE));
-  if(dd.ok&&dd.data&&dd.data.config&&dd.data.registros){state=(dirtyReg.size||dirtyConfig.size)?aplicarLocalSobre(dd.data):withDefaults(dd.data);stateGen++;cloudEtag=dd.etag;try{localStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(e){}}
+  if(dd.ok&&dd.data&&dd.data.config&&dd.data.registros){state=dirtyCount()?aplicarLocalSobre(dd.data):withDefaults(dd.data);stateGen++;cloudEtag=dd.etag;try{localStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(e){}}
   else if(dd.ok&&dd.missing){cloudEtag=null;}
   applyAccess(); renderRemoto(); setSyncStatus('☁ conectado','ok'); if(!silencioso)toast('Dados atualizados da nuvem.'); startPolling();
+  if(dirtyCount()) scheduleCloudSave(); // pendências que ficaram no aparelho (ex.: página fechada antes de salvar)
   carregarFontes(true);
 }
 let _saveTimer=null;
 function scheduleCloudSave(){if(!msAccount||['bloqueado','visualizador','leitor'].includes(nivelAcesso()))return;setSyncStatus('⏳ salvando…','saving');clearTimeout(_saveTimer);_saveTimer=setTimeout(()=>salvarDados(),900);}
+const espera=ms=>new Promise(r=>setTimeout(r,ms));
+let _retryTimer=null;
 async function salvarDados(){
-  if(!msAccount)return;if(salvando){pendente=true;return;}salvando=true;await ensureFolder();
-  let ok=false,tent=0;
-  while(tent<5&&!ok){tent++;
+  if(!msAccount||['bloqueado','visualizador','leitor'].includes(nivelAcesso()))return;
+  if(salvando){pendente=true;return;} if(!dirtyCount()){setSyncStatus('☁ salvo','ok');return;}
+  salvando=true; clearTimeout(_retryTimer); await ensureFolder();
+  let ok=false,tent=0,mesclou=false;
+  while(tent<10&&!ok){tent++;
+    const foto=fotoDirty();
     const res=await graphPutEtag(spPath(DADOS_FILE),new TextEncoder().encode(JSON.stringify(state)),cloudEtag);
-    if(res.ok){cloudEtag=res.etag||cloudEtag;dirtyReg.clear();dirtyConfig.clear();ok=true;setSyncStatus('☁ salvo','ok');}
-    else if(res.status===412||res.status===409){setSyncStatus('⟳ mesclando…','saving');const dd=await graphGetJsonEtag(spPath(DADOS_FILE));if(dd.ok&&dd.data&&dd.data.config&&dd.data.registros){state=aplicarLocalSobre(dd.data);stateGen++;cloudEtag=dd.etag;try{localStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(e){}}else break;}
-    else break;
+    if(res.ok){cloudEtag=res.etag||cloudEtag;limparEnviados(foto);ok=true;}
+    else if(res.status===412||res.status===409||(res.status===404&&cloudEtag)||res.status===423||res.status===429||res.status>=500||res.status===0){
+      setSyncStatus('⟳ mesclando…','saving');
+      await espera(Math.min(4000,250*tent)+Math.random()*400);   // espera com sorteio: evita que todos tentem no mesmo instante
+      const dd=await graphGetJsonEtag(spPath(DADOS_FILE));
+      if(dd.ok&&dd.data&&dd.data.config&&dd.data.registros){state=aplicarLocalSobre(dd.data);stateGen++;cloudEtag=dd.etag;mesclou=true;try{localStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(e){}}
+      else if(dd.ok&&dd.missing){cloudEtag=null;}
+    }
+    else break; // 401/403: sem permissão na pasta
   }
-  salvando=false;if(!ok)setSyncStatus('⚠ salvo só no aparelho','warn');if(pendente){pendente=false;salvarDados();}
+  salvando=false;
+  if(ok){ setSyncStatus(dirtyCount()?'⏳ salvando…':'☁ salvo', dirtyCount()?'saving':'ok'); if(mesclou) renderRemoto(); }
+  else { setSyncStatus('⚠ não salvou — tentando de novo','warn'); _retryTimer=setTimeout(salvarDados,5000+Math.random()*3000); }
+  if(pendente||(ok&&dirtyCount())){pendente=false;salvarDados();}
 }
 let _pollTimer=null;
 function startPolling(){clearInterval(_pollTimer);_pollTimer=setInterval(puxarSeMudou,15000);}
-async function puxarSeMudou(){if(!msAccount||salvando)return;if(dirtyReg.size||dirtyConfig.size)return;const a=document.activeElement;if(a&&(a.tagName==='INPUT'||a.tagName==='SELECT'))return;const dd=await graphGetJsonEtag(spPath(DADOS_FILE));if(dd.ok&&dd.etag&&dd.etag!==cloudEtag&&dd.data&&dd.data.config){state=withDefaults(dd.data);stateGen++;cloudEtag=dd.etag;try{localStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(e){}applyAccess();renderRemoto();setSyncStatus('⟳ atualizado agora','ok');}}
+async function puxarSeMudou(){if(!msAccount||salvando)return;if(dirtyCount())return;const a=document.activeElement;if(a&&(a.tagName==='INPUT'||a.tagName==='SELECT'))return;const dd=await graphGetJsonEtag(spPath(DADOS_FILE));if(dd.ok&&dd.etag&&dd.etag!==cloudEtag&&dd.data&&dd.data.config){state=withDefaults(dd.data);stateGen++;cloudEtag=dd.etag;try{localStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(e){}applyAccess();renderRemoto();setSyncStatus('⟳ atualizado agora','ok');}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)puxarSeMudou();});
 async function saveAcesso(){if(!msAccount){toast('Entre com o Microsoft para gerenciar usuários.');return;}await ensureFolder();let ok=false,tent=0;const uni=(a,b)=>Array.from(new Set([...(a||[]),...(b||[])]));while(tent<5&&!ok){tent++;const res=await graphPutEtag(spPath(ACESSO_FILE),new TextEncoder().encode(JSON.stringify(acesso)),acessoEtag);if(res.ok){acessoEtag=res.etag||acessoEtag;ok=true;}else if(res.status===412||res.status===409){const ac=await graphGetJsonEtag(spPath(ACESSO_FILE));if(ac.ok&&ac.data){acesso.emailsAutorizados=uni(ac.data.emailsAutorizados,acesso.emailsAutorizados);acesso.emailsComuns=uni(ac.data.emailsComuns,acesso.emailsComuns).filter(e=>!acesso.emailsAutorizados.includes(e));acessoEtag=ac.etag;}else break;}else break;}if(!ok)toast('⚠ Não foi possível salvar os usuários.');}
 
@@ -1366,7 +1407,7 @@ function applyAccess(){
   if(nivel==='deslogado'){ovL.style.display='flex';ovN.style.display='none';return;}ovL.style.display='none';
   if(nivel==='bloqueado'){ovN.style.display='flex';document.getElementById('overlay-email-info').textContent='Logado como: '+emailAtual();return;}ovN.style.display='none';
   const adm=isAdmin(); document.body.classList.toggle('is-admin',adm);
-  if(adm&&msAccount){ sincronizarMembros(); if(_migrados.length){ _migrados.splice(0).forEach(id=>dirtyConfig.add('eq:'+id)); _migRegs.splice(0).forEach(k=>dirtyReg.add(k)); save(); } }
+  if(adm&&msAccount){ sincronizarMembros(); if(_migrados.length){ _migrados.splice(0).forEach(id=>marcarCfg('eq:'+id)); _migRegs.splice(0).forEach(k=>marcarReg(k)); save(); } }
   if(!adm&&['campos','parametros'].includes(abaAtiva())) document.querySelector('#tabs button[data-tab="painel"]').click();
   const info=document.getElementById('ms-user-info'); if(msAccount){info.textContent='SharePoint › '+SP_PASTA+' · '+({admin:'administrador',visualizador:'visualizador',membro:'equipe: '+state.config.equipes.filter(ehMembro).map(e=>e.nome).join(', ')+(state.config.equipes.some(ehLeitor)?' · visualiza: '+state.config.equipes.filter(ehLeitor).map(e=>e.nome).join(', '):''),leitor:'visualiza: '+state.config.equipes.filter(ehLeitor).map(e=>e.nome).join(', ')}[nivel]||'');}
 }
