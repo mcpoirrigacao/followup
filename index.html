@@ -858,13 +858,142 @@ function integrada(eq){return eq.tipo!=='manual';}
 /* nas equipes integradas (Peças/Assistência) o preenchimento vem do outro app: só existe "quem visualiza" */
 function ehMembro(eq){return !integrada(eq)&&low(eq.membros).includes(emailAtual());}
 function ehLeitor(eq){return low(eq.visualizadores).includes(emailAtual());}
+/* ===== MCPO · configuração de acesso deste app ===== */
+var MCPO_CFG = {
+  roles: [
+    ['admin',['MCPO.Admin','Followup.Admin']],
+    ['visualizador',['Followup.Leitor']]
+  ],
+  token: async()=>{ try{ return await getGraphToken(); }catch(e){ return null; } },
+  toast: m=>toast(m),
+  pastas: async()=>{ const F=state.config.fontes||{}; const ext=[F.pecas&&F.pecas.pasta,F.assist&&F.assist.pasta,F.trein&&F.trein.pasta].filter(Boolean); return [{chave:'propria',propria:true,url:await mcpoUrlCaminho(`/${SP_BIBLIOTECA}/${SP_PASTA}`)}].concat(await Promise.all(ext.map(async p=>({chave:'leitura:'+p,url:await mcpoUrlCaminho(`/${SP_BIBLIOTECA}/${p}`)})))); },
+  desejado: ()=>{ const out=[]; mapaAcessos().forEach(x=>{ out.push([x.email,'propria',x.editar?'write':'read']); x.leitura.forEach(p=>out.push([x.email,'leitura:'+p,'read'])); }); return out; },
+  ancora: 'lista-comuns',
+  podeGerir: ()=>nivelAcesso()==='admin'
+};
+/* ===================== MCPO · ACESSO PADRONIZADO (v1) =====================
+   Igual em todos os apps MCPO. Só o bloco MCPO_CFG (logo acima) muda de app para app.
+   1) Funções do app no Azure (registro "MCPO API Github") têm prioridade sobre as listas de e-mail.
+   2) Quem está nas listas recebe permissão direta na pasta do app no SharePoint (editar ou ler);
+      quem sai das listas perde essa permissão. O app anota o que liberou em _mcpo_permissoes.json
+      e só retira o que ele mesmo liberou. Em pastas de outros apps (leitura), nunca retira.
+   Usa o login do admin com Sites.ReadWrite.All (sem permissão nova no Azure). */
+function rolesAtuais(){
+  const r = (typeof msAccount!=='undefined' && msAccount && msAccount.idTokenClaims && msAccount.idTokenClaims.roles) || [];
+  return Array.isArray(r) ? r : [];
+}
+function nivelPorFuncao(){
+  const r = rolesAtuais();
+  for(const [nivel, lista] of MCPO_CFG.roles){ if(r.some(x=>lista.includes(x))) return nivel; }
+  return null;
+}
+const MCPO_GRAPH='https://graph.microsoft.com/v1.0', MCPO_REG='_mcpo_permissoes.json';
+let _mcpoSite=null, _mcpoFila=Promise.resolve();
+function _mcpoEnc(p){ return p.split('/').map(encodeURIComponent).join('/'); }
+async function mcpoUrlCaminho(caminho){   // caminho como os apps usam: '/Documentos Compartilhados/<pasta>'
+  const tk=await MCPO_CFG.token(); if(!tk) return null;
+  if(!_mcpoSite){
+    const r=await fetch(`${MCPO_GRAPH}/sites/maqcampoirrigacao.sharepoint.com:/sites/MCPOIRRIGACAO`,{headers:{Authorization:'Bearer '+tk}});
+    if(!r.ok) return null; _mcpoSite=(await r.json()).id;
+  }
+  return `${MCPO_GRAPH}/sites/${_mcpoSite}/drive/root:${_mcpoEnc(caminho)}`;
+}
+function _mcpoAcao(url,acao){ return url.includes('/root:') ? url+':/'+acao : url+'/'+acao; }
+function _mcpoFilho(url,nome){ return url.includes('/root:') ? url+'/'+encodeURIComponent(nome) : url+':/'+encodeURIComponent(nome); }
+async function _mcpoErro(r){ let m=''; try{ m=(await r.json()).error.message; }catch(e){} return r.status===403?'sem permissão para compartilhar a pasta':(m||('erro '+r.status)); }
+async function mcpoConceder(tk,url,email,papel){
+  try{
+    const r=await fetch(_mcpoAcao(url,'invite'),{method:'POST',headers:{Authorization:'Bearer '+tk,'Content-Type':'application/json'},
+      body:JSON.stringify({recipients:[{email}],requireSignIn:true,sendInvitation:false,roles:[papel==='read'?'read':'write']})});
+    return r.ok?{ok:true}:{ok:false,msg:await _mcpoErro(r)};
+  }catch(e){ return {ok:false,msg:'falha de rede'}; }
+}
+function _mcpoTemEmail(p,em){
+  const ids=[p.grantedToV2,p.grantedTo,...(p.grantedToIdentitiesV2||[]),...(p.grantedToIdentities||[])].filter(Boolean);
+  return ids.some(g=>{ const u=g.user||g.siteUser||{}; return [u.email,u.loginName,u.userPrincipalName].some(v=>v&&String(v).toLowerCase().includes(em)); });
+}
+async function mcpoRetirar(tk,url,email){
+  const em=String(email).toLowerCase();
+  try{
+    const r=await fetch(_mcpoAcao(url,'permissions'),{headers:{Authorization:'Bearer '+tk}});
+    if(!r.ok) return {ok:false,msg:await _mcpoErro(r)};
+    const perms=((await r.json()).value||[]).filter(p=>!p.inheritedFrom&&!(p.roles||[]).includes('owner')&&_mcpoTemEmail(p,em));
+    for(const p of perms){
+      const ids=[...(p.grantedToIdentitiesV2||[]),...(p.grantedToIdentities||[])];
+      const d=(p.link&&ids.length>1)
+        ? await fetch(_mcpoAcao(url,'permissions/'+p.id+'/revokeGrants'),{method:'POST',headers:{Authorization:'Bearer '+tk,'Content-Type':'application/json'},body:JSON.stringify({grantees:[{email}]})})
+        : await fetch(_mcpoAcao(url,'permissions/'+p.id),{method:'DELETE',headers:{Authorization:'Bearer '+tk}});
+      if(!d.ok) return {ok:false,msg:await _mcpoErro(d)};
+    }
+    return {ok:true};
+  }catch(e){ return {ok:false,msg:'falha de rede'}; }
+}
+/* Sincroniza as pastas com as listas do app. forcar=true libera de novo todo mundo (botão). */
+function mcpoSincronizar(forcar){
+  _mcpoFila=_mcpoFila.then(()=>_mcpoSincronizar(!!forcar)).catch(e=>console.warn('MCPO acesso:',e));
+  return _mcpoFila;
+}
+async function _mcpoSincronizar(forcar){
+  if(MCPO_CFG.podeGerir && !MCPO_CFG.podeGerir()) return;
+  const tk=await MCPO_CFG.token(); if(!tk) return;
+  const pastas=(await MCPO_CFG.pastas()).filter(p=>p&&p.url); if(!pastas.length) return;
+  const propria=pastas.find(p=>p.propria)||pastas[0];
+  const regUrl=_mcpoFilho(propria.url,MCPO_REG);
+  let reg={pastas:{}};
+  try{ const r=await fetch(_mcpoAcao(regUrl,'content'),{headers:{Authorization:'Bearer '+tk},cache:'no-store'}); if(r.ok){ const j=await r.json(); if(j&&j.pastas) reg=j; } }catch(e){}
+  // desejado: { chave: { email: 'write'|'read' } }  — 'write' vale mais que 'read'
+  const quer={};
+  for(const [email,chave,papel] of MCPO_CFG.desejado()){
+    const em=String(email||'').trim().toLowerCase(); if(!em||!em.includes('@')) continue;
+    const q=(quer[chave]=quer[chave]||{}); if(q[em]!=='write') q[em]=papel==='read'?'read':'write';
+  }
+  let lib=0, ret=0; const falhas=[]; let mudou=false;
+  for(const p of pastas){
+    const q=quer[p.chave]||{}, tem=(reg.pastas[p.chave]=reg.pastas[p.chave]||{});
+    for(const [em,papel] of Object.entries(q)){
+      if(!forcar && tem[em]===papel) continue;
+      if(p.propria && tem[em] && tem[em]!==papel) await mcpoRetirar(tk,p.url,em);   // mudou de nível
+      const r=await mcpoConceder(tk,p.url,em,papel);
+      if(r.ok){ if(tem[em]!==papel) lib++; tem[em]=papel; mudou=true; } else falhas.push(em+' ('+r.msg+')');
+    }
+    for(const em of Object.keys(tem)){
+      if(q[em]) continue;
+      if(p.propria){ const r=await mcpoRetirar(tk,p.url,em); if(!r.ok){ falhas.push(em+' ('+r.msg+')'); continue; } ret++; }
+      delete tem[em]; mudou=true;   // pasta de outro app: só esquece, não retira
+    }
+  }
+  if(mudou){
+    reg.atualizadoEm=new Date().toISOString(); reg.atualizadoPor=(typeof msAccount!=='undefined'&&msAccount&&msAccount.username)||'';
+    try{ await fetch(_mcpoAcao(regUrl,'content'),{method:'PUT',headers:{Authorization:'Bearer '+tk,'Content-Type':'application/json'},body:JSON.stringify(reg,null,1)}); }catch(e){}
+  }
+  if(falhas.length) MCPO_CFG.toast('SharePoint: '+(lib||ret?`${lib} liberado(s), ${ret} retirado(s); `:'')+'não foi possível para '+falhas.join(', '));
+  else if(lib||ret) MCPO_CFG.toast(`Pasta do SharePoint atualizada: ${lib} liberado(s), ${ret} retirado(s).`);
+  else if(forcar) MCPO_CFG.toast('Pasta do SharePoint conferida: todos da lista têm acesso.');
+}
+/* Botão + aviso no card de usuários (criado uma vez, ao lado da lista indicada em MCPO_CFG.ancora). */
+function mcpoBotaoPasta(){
+  if(document.getElementById('mcpo-sync-pasta')) return;
+  const a=document.getElementById(MCPO_CFG.ancora); if(!a) return;
+  const card=a.closest('.card,fieldset,.drawer,section')||a.parentNode;
+  const box=document.createElement('div'); box.className='note'; box.style.marginTop='10px';
+  box.innerHTML='Ao adicionar ou remover um e-mail, o app libera ou retira a permissão na pasta do SharePoint automaticamente. '
+    +'Funções do Azure (MCPO API Github) também dão acesso ao app. '
+    +'<button class="btn ghost small" id="mcpo-sync-pasta" type="button" style="margin-left:6px;">Sincronizar pasta com a lista</button>';
+  card.appendChild(box);
+  document.getElementById('mcpo-sync-pasta').addEventListener('click',async e=>{
+    const b=e.currentTarget; b.disabled=true; const t=b.textContent; b.textContent='Sincronizando…';
+    try{ await mcpoSincronizar(true); } finally{ b.disabled=false; b.textContent=t; }
+  });
+}
+/* =================== fim MCPO · ACESSO PADRONIZADO =================== */
+
 function nivelAcesso(){
   if(!msAccount) return msalReady?'deslogado':'local';
+  { const _f=nivelPorFuncao(); if(_f) return _f; }
   const e=emailAtual();
   if(low(acesso.emailsAutorizados).includes(e)) return 'admin';
   const algumMembro=state.config.equipes.some(eq=>(eq.membros||[]).length||(eq.visualizadores||[]).length);
   if(!acessoOk||!nuvemOk) return 'semnuvem';
-  if(!acessoExiste&&!dadosExiste&&!acesso.emailsAutorizados.length&&!acesso.emailsComuns.length&&!algumMembro) return 'admin'; // só na 1ª instalação real
   if(low(acesso.emailsComuns).includes(e)) return 'visualizador';
   if(state.config.equipes.some(ehMembro)) return 'membro';
   if(state.config.equipes.some(ehLeitor)) return 'leitor';
@@ -1514,7 +1643,7 @@ async function salvarDados(){
   while(tent<10&&!ok){tent++;
     const foto=fotoDirty();
     const res=await graphPutEtag(spPath(DADOS_FILE),new TextEncoder().encode(JSON.stringify(state)),cloudEtag);
-    if(res.ok){cloudEtag=res.etag||cloudEtag;limparEnviados(foto);ok=true;}
+    if(res.ok){cloudEtag=res.etag||cloudEtag;limparEnviados(foto);ok=true;if(Array.from(foto.cfg.keys()).some(k=>String(k).startsWith('eq:')))mcpoSincronizar();}
     else if(res.status===412||res.status===409||(res.status===404&&cloudEtag)||res.status===423||res.status===429||res.status>=500||res.status===0){
       setSyncStatus('⟳ mesclando…','saving');
       await espera(Math.min(4000,250*tent)+Math.random()*400);   // espera com sorteio: evita que todos tentem no mesmo instante
@@ -1533,7 +1662,7 @@ let _pollTimer=null;
 function startPolling(){clearInterval(_pollTimer);_pollTimer=setInterval(puxarSeMudou,15000);}
 async function puxarSeMudou(){if(!msAccount||salvando)return;if(dirtyCount())return;const a=document.activeElement;if(a&&(a.tagName==='INPUT'||a.tagName==='SELECT'))return;const dd=await graphGetJsonEtag(spPath(DADOS_FILE));if(dd.ok&&dd.etag&&dd.etag!==cloudEtag&&dd.data&&dd.data.config){state=withDefaults(dd.data);stateGen++;cloudEtag=dd.etag;try{localStorage.setItem(STORE_KEY,JSON.stringify(state));}catch(e){}applyAccess();renderRemoto();setSyncStatus('⟳ atualizado agora','ok');}}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)puxarSeMudou();});
-async function saveAcesso(){if(!msAccount){toast('Entre com o Microsoft para gerenciar usuários.');return;}if(!acessoOk){toast('⚠ Sem leitura da pasta FollowUP — usuários não foram salvos.');return;}await ensureFolder();let ok=false,tent=0;const uni=(a,b)=>Array.from(new Set([...(a||[]),...(b||[])]));while(tent<5&&!ok){tent++;const res=await graphPutEtag(spPath(ACESSO_FILE),new TextEncoder().encode(JSON.stringify(acesso)),acessoEtag);if(res.ok){acessoEtag=res.etag||acessoEtag;ok=true;}else if(res.status===412||res.status===409){const ac=await graphGetJsonEtag(spPath(ACESSO_FILE));if(ac.ok&&ac.data){acesso.emailsAutorizados=uni(ac.data.emailsAutorizados,acesso.emailsAutorizados);acesso.emailsComuns=uni(ac.data.emailsComuns,acesso.emailsComuns).filter(e=>!acesso.emailsAutorizados.includes(e));acessoEtag=ac.etag;}else break;}else break;}if(!ok)toast('⚠ Não foi possível salvar os usuários.');}
+async function saveAcesso(){if(!msAccount){toast('Entre com o Microsoft para gerenciar usuários.');return;}if(!acessoOk){toast('⚠ Sem leitura da pasta FollowUP — usuários não foram salvos.');return;}await ensureFolder();let ok=false,tent=0;const uni=(a,b)=>Array.from(new Set([...(a||[]),...(b||[])]));while(tent<5&&!ok){tent++;const res=await graphPutEtag(spPath(ACESSO_FILE),new TextEncoder().encode(JSON.stringify(acesso)),acessoEtag);if(res.ok){acessoEtag=res.etag||acessoEtag;ok=true;}else if(res.status===412||res.status===409){const ac=await graphGetJsonEtag(spPath(ACESSO_FILE));if(ac.ok&&ac.data){acesso.emailsAutorizados=uni(ac.data.emailsAutorizados,acesso.emailsAutorizados);acesso.emailsComuns=uni(ac.data.emailsComuns,acesso.emailsComuns).filter(e=>!acesso.emailsAutorizados.includes(e));acessoEtag=ac.etag;}else break;}else break;}if(!ok)toast('⚠ Não foi possível salvar os usuários.'); else mcpoSincronizar();}
 
 /* ==================== CONTROLE DE ACESSO ==================== */
 function applyAccess(){
@@ -1548,9 +1677,9 @@ function applyAccess(){
   if(!adm&&['campos','parametros'].includes(abaAtiva())) document.querySelector('#tabs button[data-tab="painel"]').click();
   const info=document.getElementById('ms-user-info'); if(msAccount){info.textContent='SharePoint › '+SP_PASTA+' · '+({admin:'administrador',visualizador:'visualizador',membro:'equipe: '+state.config.equipes.filter(ehMembro).map(e=>e.nome).join(', ')+(state.config.equipes.some(ehLeitor)?' · visualiza: '+state.config.equipes.filter(ehLeitor).map(e=>e.nome).join(', '):''),leitor:'visualiza: '+state.config.equipes.filter(ehLeitor).map(e=>e.nome).join(', ')}[nivel]||'');}
 }
-function renderUsuarios(){
+function renderUsuarios(){ mcpoBotaoPasta();
   const la=document.getElementById('lista-admins');
-  la.innerHTML=acesso.emailsAutorizados.length?acesso.emailsAutorizados.map((em,i)=>`<div class="user-row"><span>👤 ${escapeHtml(em)} <span class="reg">ADMIN</span></span><button class="btn danger small" data-rem-admin="${i}" type="button">remover</button></div>`).join(''):`<div style="color:var(--texto-suave);font-size:.82rem;">Nenhum admin — o primeiro login vira admin.</div>`;
+  la.innerHTML=acesso.emailsAutorizados.length?acesso.emailsAutorizados.map((em,i)=>`<div class="user-row"><span>👤 ${escapeHtml(em)} <span class="reg">ADMIN</span></span><button class="btn danger small" data-rem-admin="${i}" type="button">remover</button></div>`).join(''):`<div style="color:var(--texto-suave);font-size:.82rem;">Nenhum admin — admins também podem vir da função do Azure.</div>`;
   la.querySelectorAll('[data-rem-admin]').forEach(b=>b.onclick=async()=>{acesso.emailsAutorizados.splice(+b.dataset.remAdmin,1);await saveAcesso();renderUsuarios();applyAccess();});
   const lc=document.getElementById('lista-comuns');
   lc.innerHTML=acesso.emailsComuns.length?acesso.emailsComuns.map((em,i)=>`<div class="user-row"><span>👁 ${escapeHtml(em)}</span><button class="btn danger small" data-rem-comum="${i}" type="button">remover</button></div>`).join(''):`<div style="color:var(--texto-suave);font-size:.82rem;">Nenhum visualizador.</div>`;
