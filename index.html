@@ -85,6 +85,7 @@ table.dt td{padding:6px 7px;border-bottom:1px solid var(--areia-escura);vertical
 table.dt tr:hover td{background:#fbf7ef;}
 table.dt td.num{font-family:var(--fonte-dado);text-align:right;white-space:nowrap;}
 table.dt td.nome{font-weight:600;white-space:nowrap;}
+table.dt td.bloq{background:repeating-linear-gradient(45deg,#f1ece2,#f1ece2 6px,#e9e2d4 6px,#e9e2d4 12px);color:var(--texto-suave);text-align:center;cursor:not-allowed;}
 table.dt tr.minha td{background:#f2f8f2;}
 #lanc-body table.dt tr.minha td:first-child{background:#e4f1e6;box-shadow:inset 3px 0 0 var(--ferrugem),1px 0 0 var(--areia-escura);}
 table.dt tr.total-row td{background:var(--areia-escura);font-weight:700;color:var(--azul-escuro);border-top:2px solid var(--azul-escuro);}
@@ -453,6 +454,7 @@ function withDefaults(s){
         delete s.registros[k]; _migRegs.push(k,nk); });
       eq.migr='trein2'; _migrados.push(eq.id);
     }
+    if(eq.id==='pivo'&&eq.migrSeg!=='s1'){ eq.campos.forEach(c=>{ if(['KM RODADO','CLIENTES VISITADOS'].includes(norm(c.nome))) c.segUnico=true; }); eq.migrSeg='s1'; _migrados.push(eq.id); }
     if(eq.id==='pivo'&&eq.migrGrp!=='g1'){
       const G={'CARRETEL UNIDADE':'CARRETEL','CARRETEL VALOR':'CARRETEL','PEÇAS':'PEÇAS','PEÇAS FATURADO':'PEÇAS','QTDE LANCES':'PIVÔ','VALOR PIVÔ':'PIVÔ','IRRICONTROL':'IRRICONTROL','VALOR IRRICONTROL':'IRRICONTROL'};
       ['CACAU','GRÃOS','AÇAÍ','CITRUS','CANA','CAFÉ','PASTAGEM','GOTEJO'].forEach(x=>{G[x]=x;G['VALOR '+x]=x;});
@@ -634,7 +636,10 @@ function regionaisEquipe(eq){ return Array.from(new Set(eq.linhas.map(l=>(l.regi
 function rec(s,eqId,lId,g){return state.registros[rkey(s,eqId,lId,g)];}
 function valorArmazenado(s,eq,lId,g,c){const r=rec(s,eq.id,lId,g);return r&&r.v?r.v[c.id]:undefined;}
 /* valor efetivo: campo automático usa o app de origem quando há dado; senão o histórico gravado */
+/* campo lançado só no 1º bloco (ex.: Pivô: KM RODADO e CLIENTES VISITADOS só em FRIO) — nos demais blocos é bloqueado e não soma, para não duplicar */
+function bloqueadoNoSeg(eq,c,g){ return !!c.segUnico&&eq.segmentos&&eq.segmentos.length>1&&g!==eq.segmentos[0]; }
 function valor(s,eq,lId,g,c){
+  if(bloqueadoNoSeg(eq,c,g)) return undefined;
   if(c.auto){ const live=autoVal(eq,s,lId,c.auto); if(live!==undefined) return live; }
   const v=valorArmazenado(s,eq,lId,g,c);
   /* equipes integradas: campo sem fonte no outro app (ex.: KM RODADO em Peças) vem zerado; histórico importado é mantido */
@@ -1038,6 +1043,7 @@ function renderLanc(){
       html+=`<tr${minhaLinha(eq,l)?' class="minha"':''}><td class="nome">${escapeHtml(l.nome)}${minhaLinha(eq,l)?' <span class="pill ok">você</span>':''}${porEmail(eq)&&!linhaEditavel(eq,l)&&!outro?` <span class="pill pend" title="${l.email?'E-mail removido de Quem preenche — linha inativa':'Linha antiga sem e-mail — ligue a um e-mail em Equipes &amp; Campos para editar'}">${l.email?'inativo':'histórico'}</span>`:''}</td>${eq.usaRegional?`<td>${l.regional?`<span class="reg ${escapeHtml(l.regional)}">${escapeHtml(l.regional)}</span>`:''}</td>`:''}`;
       cols.forEach(c=>{
         const v=valor(s,eq,l.id,g,c);
+        if(bloqueadoNoSeg(eq,c,g)){ html+=`<td class="bloq" title="Lançado só em ${escapeHtml(eq.segmentos[0])}">—</td>`; return; }
         if(c.auto){ const live=autoVal(eq,s,l.id,c.auto)!==undefined; html+=`<td class="auto ${live?'':'hist'}" title="${live?'do app':'histórico gravado'}">${fmt(c,v)}</td>`; return; }
         if(eq.tipo!=='manual'){ html+=`<td class="auto hist" title="sem informação no app — zerado">${fmt(c,v)}</td>`; return; }
         const val=temValor(v)?v:'';
@@ -1124,11 +1130,11 @@ function renderCampos(){
       <div class="field"><label>&nbsp;</label><label class="check"><input type="checkbox" id="e-reg" ${eq.usaRegional?'checked':''}> usa Regional nas linhas</label><label class="check"><input type="checkbox" id="e-ativo" ${eq.ativo!==false?'checked':''}> equipe ativa</label>${eq.tipo==='manual'?`<label class="check"><input type="checkbox" id="e-email" ${porEmail(eq)?'checked':''}> nome da linha vem do e-mail de quem preenche</label>`:''}</div>
     </div></div>`;
   // campos
-  h+=`<div class="card"><h3>Campos que a equipe preenche <span class="h3-side">desmarque "Ativo" para esconder sem perder o histórico</span></h3><div class="tablewrap" style="max-height:none;"><table class="dt cfg"><thead><tr><th></th><th>Campo</th><th>Subgrupo</th><th>Tipo</th><th>Opções (lista)</th><th>Total da equipe</th><th class="r">Meta semanal</th><th>Destaque</th><th>Ativo</th><th></th></tr></thead><tbody>`;
+  h+=`<div class="card"><h3>Campos que a equipe preenche <span class="h3-side">desmarque "Ativo" para esconder sem perder o histórico</span></h3><div class="tablewrap" style="max-height:none;"><table class="dt cfg"><thead><tr><th></th><th>Campo</th><th>Subgrupo</th><th>Tipo</th><th>Opções (lista)</th><th>Total da equipe</th><th class="r">Meta semanal</th><th>Destaque</th>${eq.segmentos.length>1?`<th title="Lançado só no bloco ${escapeHtml(eq.segmentos[0])}; nos outros fica bloqueado">Só ${escapeHtml(eq.segmentos[0])}</th>`:''}<th>Ativo</th><th></th></tr></thead><tbody>`;
   ordenarGrupos(eq);
   const vis=eq.campos.filter(c=>!c.removido); const bls=blocos(vis);
   bls.forEach((b,bi)=>{
-   if(b.g) h+=`<tr class="grp-row" data-grp="${escapeHtml(b.g)}"><td style="white-space:nowrap;"><button class="btn icon ghost" data-gup="${bi}" type="button" ${bi===0?'disabled':''} title="Subir o subgrupo">↑</button><button class="btn icon ghost" data-gdown="${bi}" type="button" ${bi===bls.length-1?'disabled':''} title="Descer o subgrupo">↓</button></td><td colspan="9">▸ ${escapeHtml(b.g)} <span style="font-weight:400;color:var(--texto-suave);">(${b.itens.length} ${b.itens.length===1?'item':'itens'})</span> <button class="btn ghost small" data-gadd="${escapeHtml(b.g)}" type="button" style="margin-left:8px;">+ item em ${escapeHtml(b.g)}</button></td></tr>`;
+   if(b.g) h+=`<tr class="grp-row" data-grp="${escapeHtml(b.g)}"><td style="white-space:nowrap;"><button class="btn icon ghost" data-gup="${bi}" type="button" ${bi===0?'disabled':''} title="Subir o subgrupo">↑</button><button class="btn icon ghost" data-gdown="${bi}" type="button" ${bi===bls.length-1?'disabled':''} title="Descer o subgrupo">↓</button></td><td colspan="${eq.segmentos.length>1?10:9}">▸ ${escapeHtml(b.g)} <span style="font-weight:400;color:var(--texto-suave);">(${b.itens.length} ${b.itens.length===1?'item':'itens'})</span> <button class="btn ghost small" data-gadd="${escapeHtml(b.g)}" type="button" style="margin-left:8px;">+ item em ${escapeHtml(b.g)}</button></td></tr>`;
    b.itens.forEach((c,ii)=>{ const i=vis.indexOf(c); const solo=!b.g;
     h+=`<tr class="${c.ativo?'':'inativo'} ${b.g?'grp-item':''}" data-cid="${c.id}">
       <td style="white-space:nowrap;"><button class="btn icon ghost" ${solo?`data-gup="${bi}"`:`data-up="${i}"`} type="button" ${(solo?bi===0:ii===0)?'disabled':''}>↑</button><button class="btn icon ghost" ${solo?`data-gdown="${bi}"`:`data-down="${i}"`} type="button" ${(solo?bi===bls.length-1:ii===b.itens.length-1)?'disabled':''}>↓</button></td>
@@ -1139,6 +1145,7 @@ function renderCampos(){
       <td>${isNum(c)?`<select data-k="agreg">${Object.entries(AGREG).map(([k,v])=>`<option value="${k}" ${c.agreg===k?'selected':''}>${v}</option>`).join('')}</select>`:'—'}</td>
       <td>${isNum(c)?`<input type="number" step="any" data-k="meta" value="${n(c.meta)||''}" style="text-align:right;">`:'—'}</td>
       <td style="text-align:center;">${isNum(c)?`<input type="checkbox" data-k="destaque" ${c.destaque?'checked':''}>`:''}</td>
+      ${eq.segmentos.length>1?`<td style="text-align:center;"><input type="checkbox" data-k="segUnico" ${c.segUnico?'checked':''}></td>`:''}
       <td style="text-align:center;"><input type="checkbox" data-k="ativo" ${c.ativo?'checked':''}></td>
       <td>${c.auto?'':`<button class="btn icon danger" data-rem="${c.id}" type="button" title="Remover campo">🗑</button>`}</td></tr>`;
    });
@@ -1191,7 +1198,7 @@ function renderCampos(){
     else if(k==='grupo'){ const v=el.value.trim().toUpperCase(); const ex=gruposEquipe(eq).find(g=>norm(g)===norm(v)); c.grupo=ex||v; ordenarGrupos(eq); }
     else if(k==='opcoes') c.opcoes=el.value.split(',').map(x=>x.trim()).filter(Boolean);
     else if(k==='meta') c.meta=el.value===''?0:Number(el.value);
-    else if(k==='destaque'||k==='ativo') c[k]=el.checked;
+    else if(k==='destaque'||k==='ativo'||k==='segUnico') c[k]=el.checked;
     else c[k]=el.value;
     mark(); renderCampos();
   }));
