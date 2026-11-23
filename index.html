@@ -217,6 +217,7 @@ body:not(.is-admin) .somente-admin{display:none !important;}
     <p class="pane-desc" id="painel-desc">Acompanhamento semanal das equipes.</p>
     <div class="filters">
       <div class="field"><label>Equipe</label><select class="sel" id="f-equipe"></select></div>
+      <div class="field" id="f-linha-wrap" style="display:none;"><label id="f-linha-label">Individual</label><select class="sel" id="f-linha"></select></div>
       <div class="field"><label>Período do gráfico</label>
         <select class="sel" id="f-periodo">
           <option value="4">Últimas 4 semanas</option><option value="8">Últimas 8 semanas</option>
@@ -846,7 +847,9 @@ function renderPainel(){
   sel.value=painelEquipe;
   if(painelEquipe==='__geral') renderGeral(vis); else renderEquipe(eqById(painelEquipe));
 }
-document.getElementById('f-equipe').onchange=e=>{painelEquipe=e.target.value;campoSel=null;regionalSel='';renderPainel();};
+document.getElementById('f-equipe').onchange=e=>{painelEquipe=e.target.value;campoSel=null;regionalSel='';linhaSel='';renderPainel();};
+let linhaSel='';
+document.getElementById('f-linha').onchange=e=>{linhaSel=e.target.value;renderPainel();};
 document.getElementById('f-periodo').onchange=()=>renderPainel();
 let campoSel=null, regionalSel='';
 document.getElementById('f-campo').onchange=e=>{campoSel=e.target.value;renderPainel();};
@@ -855,6 +858,7 @@ document.getElementById('f-regional').onchange=e=>{regionalSel=e.target.value;re
 function renderGeral(vis){
   document.getElementById('f-campo-wrap').style.display='none';
   document.getElementById('f-regional-wrap').style.display='none';
+  document.getElementById('f-linha-wrap').style.display='none';
   document.getElementById('painel-desc').textContent=`Resumo da semana de ${ddmm(semanaRef)} a ${ddmm(isoStr(addDays(D(semanaRef),6)))} — clique numa equipe para ver o detalhe.`;
   const s=semanaRef, ant=addSem(s,-1), per=semanasPeriodo();
   let comLanc=0, feitas=0, total=0, ultimo=null;
@@ -883,7 +887,7 @@ function renderGeral(vis){
   pend.sort((a,b)=>vis.indexOf(a.eq)-vis.indexOf(b.eq)||cmpRegional(a.l,b.l));
   html+=pend.length?`<div class="card"><div class="tablewrap" style="max-height:340px;"><table class="dt"><thead><tr><th>Equipe</th><th>Linha</th><th>Regional</th></tr></thead><tbody>${pend.map(p=>`<tr><td>${escapeHtml(p.eq.nome)}</td><td class="nome">${escapeHtml(p.l.nome)}</td><td>${p.l.regional?`<span class="reg ${escapeHtml(p.l.regional)}">${escapeHtml(p.l.regional)}</span>`:''}</td></tr>`).join('')}</tbody></table></div></div>`:`<div class="note">Tudo preenchido nesta semana. 👍</div>`;
   const body=document.getElementById('painel-body'); body.innerHTML=html;
-  body.querySelectorAll('.team-card').forEach(c=>c.onclick=()=>{painelEquipe=c.dataset.eq;campoSel=null;regionalSel='';renderPainel();window.scrollTo({top:0,behavior:'smooth'});});
+  body.querySelectorAll('.team-card').forEach(c=>c.onclick=()=>{painelEquipe=c.dataset.eq;campoSel=null;regionalSel='';linhaSel='';renderPainel();window.scrollTo({top:0,behavior:'smooth'});});
 }
 function sparkline(vals){
   if(!vals.length) return ''; const W=260,H=40,max=Math.max(...vals,1);
@@ -901,7 +905,14 @@ function renderEquipe(eq){
   const regs=eq.usaRegional?regionaisEquipe(eq):[];
   const fr=document.getElementById('f-regional'); document.getElementById('f-regional-wrap').style.display=regs.length?'':'none';
   fr.innerHTML=`<option value="">Todas</option>`+regs.map(r=>`<option>${escapeHtml(r)}</option>`).join(''); fr.value=regionalSel;
-  const filtro=regionalSel?{regional:regionalSel}:{};
+  // filtro individual (vendedor / loja / pessoa): lista as linhas da equipe com dados no período, por regional
+  const fl=document.getElementById('f-linha'); const opLinhas=linhasEquipe(eq,{semanas:per}).filter(l=>!regionalSel||(l.regional||'')===regionalSel);
+  if(linhaSel&&!opLinhas.find(l=>l.id===linhaSel)) linhaSel='';
+  document.getElementById('f-linha-wrap').style.display=opLinhas.length>1?'':'none';
+  document.getElementById('f-linha-label').textContent=eq.rotuloLinha||'Individual';
+  fl.innerHTML=`<option value="">Todos</option>`+opLinhas.map(l=>`<option value="${l.id}">${escapeHtml(l.nome)}${l.regional?' · '+escapeHtml(l.regional):''}${l.ativo===false?' (inativo)':''}</option>`).join(''); fl.value=linhaSel;
+  const filtro=Object.assign(regionalSel?{regional:regionalSel}:{},linhaSel?{linhaId:linhaSel}:{});
+  if(linhaSel){ const ln=opLinhas.find(l=>l.id===linhaSel); document.getElementById('painel-desc').textContent=`${eq.nome} · ${ln?ln.nome:''} — semana de ${ddmm(s)} a ${ddmm(isoStr(addDays(D(s),6)))}.`; }
   const st=statusPreench(eq,s);
   const ds=nums.filter(c=>c.destaque); const kp=(ds.length?ds:nums).slice(0,8);
   let html=`<div class="meta-row">${pillStatus(st)} ${eq.tipo!=='manual'?`<span>Campos automáticos vêm do app de ${fonteDe(eq).nome}${ext[fonteDe(eq).k]?'':' <b style="color:var(--ferrugem)">(app não carregado — mostrando histórico gravado)</b>'}.</span>`:''}</div>`;
@@ -913,7 +924,7 @@ function renderEquipe(eq){
     html+=`<div class="card"><h3>Evolução semanal · ${escapeHtml(c.nome)} <span class="h3-side">${per.length} semanas · total do período: <b>${fmt(c,totalPeriodo(eq,per,c,filtro))}</b> (${AGREG[c.agreg].toLowerCase()})</span></h3>${graficoSemanas(eq,c,per,filtro)}</div>`;
   }
   // tabela por linha na semana
-  const ls=linhasEquipe(eq,{semanas:[s]}).filter(l=>!regionalSel||(l.regional||'')===regionalSel);
+  const ls=linhasEquipe(eq,{semanas:[s]}).filter(l=>(!regionalSel||(l.regional||'')===regionalSel)&&(!linhaSel||l.id===linhaSel));
   const cols=camposAtivos(eq);
   html+=`<div class="card"><h3>Por ${escapeHtml(eq.rotuloLinha||'linha')} · semana <span class="h3-side">${ls.length} linhas</span></h3><div class="tablewrap"><table class="dt">${theadCampos(cols,[`<th>${escapeHtml(eq.rotuloLinha||'Linha')}</th>`,...(eq.usaRegional?['<th>Reg.</th>']:[])],c=>(isNum(c)?'r ':'')+(c.auto?'auto':''))}<tbody>`;
   // por regional (R1 > R2 > outras); dentro da regional, maior valor do indicador primeiro
